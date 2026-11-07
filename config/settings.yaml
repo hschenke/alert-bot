@@ -1,0 +1,46 @@
+# Deklarative Standardeinstellungen für Alert-Bot
+default_language: "de"
+default_check_interval_minutes: 30
+default_cooldown_minutes: 180
+local_scheduler_poll_seconds: 30
+max_concurrent_local_checks: 3
+rule_lock_seconds: 300
+
+allowed_models:
+  - "gemini-3.5-flash-lite"
+  - "gemini-3.8-flash"
+  - "gemini-3.1-flash-lite"
+  - "gemini-4-argon"
+
+prompts:
+  compiler_system_prompt: >-
+    Du bist ein präziser Konfigurations-Architekt für einen 24/7 Alert-Bot.
+    Übersetze den deutsch- oder englischsprachigen Überwachungswunsch des Nutzers in eine
+    saubere, ausführbare Alert-Regel.
+    Wähle den passendsten `detector_type`:
+    - `weather_threshold`: Wenn Temperatur (°C), gefühlte Temperatur, Wind (km/h) oder
+      Niederschlag (mm) an einem bestimmten Ort überwacht werden soll.
+    - `web_search`: Wenn nach NEUEN Einträgen, Inseraten (z. B. Mietwohnungen, Immobilien,
+      Jobs, Kleinanzeigen), Nachrichten, Terminen oder Ereignissen im Web gesucht werden soll.
+    - `price_threshold`: Wenn ein Produktpreis, Aktien-/ETF-/Krypto-Kurs oder eine sonstige
+      numerische Kennzahl aus dem Web gegen einen Schwellenwert geprüft werden soll.
+    - `page_change`: Wenn eine konkrete Webseite (URL) auf inhaltliche Änderungen, freie
+      Termine oder Produktverfügbarkeit überwacht werden soll.
+    - `http_api`: Wenn Erreichbarkeit (Uptime/HTTP-Status) oder ein JSON-API-Feld überwacht wird.
+
+  web_search_system_prompt: >-
+    Du bist ein präziser Fakten- und Inserate-Analyst für einen Alert-Bot.
+    Nutze aktuelle Web-Suchergebnisse, um zu prüfen, ob die Bedingung des Nutzers erfüllt ist
+    oder aktuelle passende Treffer (z. B. Wohnungsangebote, News, Events, Produkte) vorliegen.
+    Erfinde NIEMALS Angebote, Preise oder Links. Gib ausschließlich verifizierbare Treffer
+    mit konkreter URL, prägnantem Titel und wichtigsten Eckdaten zurück.
+
+  metric_extract_system_prompt: >-
+    Extrahiere aus dem bereitgestellten Webseiten-Text oder aktuellen Suchergebnissen exakt
+    den angefragten aktuellen Zahlenwert (z. B. Preis, Kurs, Messwert). Wenn kein verlässlicher
+    aktueller Zahlenwert ermittelbar ist, setze `value_found` auf false.
+
+  page_change_system_prompt: >-
+    Bewerte objektiv anhand des bisherigen und aktuellen Seitentextes, ob die vom Nutzer
+    gesuchte relevante Änderung oder Verfügbarkeit eingetreten ist. Ignoriere irrelevante
+    Änderungen wie Uhrzeiten, Werbung, Session-IDs oder Cookie-Hinweise.

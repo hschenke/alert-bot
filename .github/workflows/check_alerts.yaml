@@ -1,0 +1,73 @@
+name: Run Alert-Bot Background Watcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      rule_id:
+        description: "Optionale ID eines einzelnen Wächters für Sofort-Check (leer = alle fälligen Wächter)"
+        required: false
+        default: ""
+        type: string
+      force:
+        description: "Erzwinge Prüfung unabhängig vom nächsten Fälligkeitszeitpunkt"
+        required: false
+        default: "false"
+        type: string
+  schedule:
+    # Automatischer Cloud-Takt (alle 15 Minuten).
+    # Tipp für 1–5-Minuten-Präzision ohne GitHub-Cron-Jitter:
+    # Diesen Workflow zusätzlich kostenlos über cron-job.org via REST-Dispatch triggern (siehe README.md).
+    - cron: "*/15 * * * *"
+
+jobs:
+  alert-watcher:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Quellcode auschecken
+        uses: actions/checkout@v7
+
+      - name: Python 3.12 einrichten
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-worker.txt"
+
+      - name: Worker-Abhängigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-worker.txt
+
+      - name: Fällige Alert-Wächter ausführen
+        env:
+          PYTHONUNBUFFERED: "1"
+          TARGET_RULE_ID: ${{ inputs.rule_id }}
+          FORCE_CHECK: ${{ inputs.force }}
+          WORKER_ID: "gh-run-${{ github.run_id }}"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
+          GEMINI_DEEP_MODEL: ${{ secrets.GEMINI_DEEP_MODEL || 'gemini-3.8-flash' }}
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_KEY: ${{ secrets.TURSO_KEY }}
+          EMAIL_PROVIDER: ${{ secrets.EMAIL_PROVIDER || 'resend' }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM || 'Alert Bot <onboarding@resend.dev>' }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
+        run: |
+          if [ -n "$TARGET_RULE_ID" ]; then
+            python -m src.worker.cli_worker --rule-id "$TARGET_RULE_ID" --force
+          elif [ "$FORCE_CHECK" = "true" ]; then
+            python -m src.worker.cli_worker --max-rules 30 --force
+          else
+            python -m src.worker.cli_worker --max-rules 30
+          fi
