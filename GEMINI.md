@@ -9,7 +9,7 @@
 - **Proaktive Versions-Tag Empfehlung (Semantic Versioning)**: Erhöhe bei neuen Meilensteinen die Version in `src/__version__.py` und setze/empfehle passende SemVer-Tags (`v0.X.0` für Features, `v0.X.Y` für Fixes).
 
 ## Proaktive Roadmap-Erinnerung: Weitere Alarm-Kanäle (`ntfy.sh`, `Telegram`, `Webhook`)
-- **Ausdrücklicher Benutzerwunsch**: In `v0.1.0` startet der Bot bewusst mit **E-Mail (Resend / SMTP)** als aktivem Kanal, während die Kanal-Architektur (`NotificationChannel`-Protokoll in `src/notifications/channels.py`) bereits modular vorbereitet ist.
+- **Ausdrücklicher Benutzerwunsch**: In `v0.1.x` startet der Bot bewusst mit **E-Mail (Resend)** als aktivem Kanal, während die Kanal-Architektur (`NotificationChannel`-Protokoll in `src/notifications/channels.py`) bereits modular vorbereitet ist.
 - **Regelmäßig aktiv vorschlagen**: Sobald das Basis-Projekt zuverlässig im Einsatz ist, schlage dem Benutzer bei passenden Meilensteinen oder Abschluss-Rückmeldungen immer wieder kurz und unaufdringlich den Ausbau der nächsten kostenlosen Echtzeit-Kanäle vor:
   1. **📱 ntfy.sh Push-App** (kostenloser Sofort-Push auf iOS/Android mit Notfall-Prioritätsstufen, ohne Account-Zwang)
   2. **💬 Telegram Bot** (kostenloser Sofort-Push aufs Smartphone inkl. Direktlinks)
@@ -23,7 +23,7 @@
   3. `src/security`: SSRF-Guard (inkl. DNS-Rebinding- & Redirect-Hop-Prüfung), Input-Whitelist-Validierung, HMAC-Auth & Brute-Force-Schutz.
   4. `src/storage`: `SqlExecutor`-Abstraktion + einheitliches `SqlAlertRepository` ohne dupliziertes SQL für lokales SQLite (WAL) & Turso Cloud (Hrana v2 HTTPS).
   5. `src/detectors`: Modulare Wächter-Strategien (`weather_detector`, `web_search_detector`, `price_threshold_detector`, `page_change_detector`, `http_api_detector`), Freitext-KI-Compiler (`rule_compiler`) und Deduplizierungs-/Zustands-Engine (`engine`).
-  6. `src/notifications`: Erweiterbare `NotificationChannel`-Architektur, XSS-sicheres HTML-E-Mail-Rendering & Versand via Resend / SMTP.
+  6. `src/notifications`: Erweiterbare `NotificationChannel`-Architektur, XSS-sicheres HTML-E-Mail-Rendering & Versand via Resend.
   7. `src/worker`: GitHub Actions Dispatcher (`workflow_dispatch`), lokaler Hintergrund-Scheduler & CLI-Worker (`check_alerts.yaml` für 1–60+ Min. Intervalle inkl. `cron-job.org`-Kompatibilität).
   8. `src/ui`: Reine Streamlit-Präsentationsschicht ohne Geschäfts-, SQL- oder Scraping-Logik.
 

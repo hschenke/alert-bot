@@ -72,13 +72,6 @@ class ChannelType(StrEnum):
     WEBHOOK = "webhook"
 
 
-class EmailProvider(StrEnum):
-    """Unterstützte E-Mail-Versanddienste."""
-
-    RESEND = "resend"
-    SMTP = "smtp"
-
-
 class WorkerMode(StrEnum):
     """Ausführungsmodus für Hintergrund-Prüfungen."""
 

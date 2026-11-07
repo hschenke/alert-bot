@@ -23,7 +23,7 @@ from src.config.constants import (
     DEFAULT_RULE_LOCK_SECONDS,
     DEFAULT_SQLITE_REL_PATH,
 )
-from src.domain.enums import EmailProvider, WorkerMode
+from src.domain.enums import WorkerMode
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -109,14 +109,9 @@ class AppSettings:
     max_concurrent_local_checks: int = DEFAULT_MAX_LOCAL_WORKERS
     rule_lock_seconds: int = DEFAULT_RULE_LOCK_SECONDS
 
-    email_provider: EmailProvider = EmailProvider.RESEND
     resend_api_key: str = field(default="", repr=False)
     email_to: str = ""
     email_from: str = "Alert Bot <onboarding@resend.dev>"
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = field(default="", repr=False)
 
     app_password: str = field(default="", repr=False)
     streamlit_app_url: str = ""
@@ -151,12 +146,8 @@ class AppSettings:
 
     @property
     def has_email_configured(self) -> bool:
-        """True, sobald Resend oder SMTP versandbereit konfiguriert ist."""
-        if self.email_provider == EmailProvider.RESEND:
-            return bool(self.resend_api_key and not self.resend_api_key.startswith("your_"))
-        if self.email_provider == EmailProvider.SMTP:
-            return bool(self.smtp_host and self.smtp_user and self.smtp_password)
-        return False
+        """True, sobald ein gültiger Resend API Key gesetzt ist."""
+        return bool(self.resend_api_key and not self.resend_api_key.startswith("your_"))
 
 
 def _build_prompt_settings(yaml_cfg: dict[str, Any]) -> PromptSettings:
@@ -175,7 +166,6 @@ def load_app_settings(yaml_path: Path | None = None) -> AppSettings:
     yaml_cfg = _load_yaml_defaults(yaml_path)
     turso_url = get_secret_or_env("TURSO_URL") or get_secret_or_env("TURSO_DATABASE_URL")
     turso_key = get_secret_or_env("TURSO_KEY") or get_secret_or_env("TURSO_AUTH_TOKEN")
-    raw_port = get_secret_or_env("SMTP_PORT", "587")
     raw_models = yaml_cfg.get("allowed_models")
     models = (
         tuple(str(m).strip() for m in raw_models if str(m).strip())
@@ -199,14 +189,9 @@ def load_app_settings(yaml_path: Path | None = None) -> AppSettings:
         local_scheduler_poll_seconds=int(yaml_cfg.get("local_scheduler_poll_seconds", DEFAULT_LOCAL_POLL_SECONDS)),
         max_concurrent_local_checks=int(yaml_cfg.get("max_concurrent_local_checks", DEFAULT_MAX_LOCAL_WORKERS)),
         rule_lock_seconds=int(yaml_cfg.get("rule_lock_seconds", DEFAULT_RULE_LOCK_SECONDS)),
-        email_provider=_parse_enum(EmailProvider, get_secret_or_env("EMAIL_PROVIDER", "resend"), EmailProvider.RESEND),
         resend_api_key=get_secret_or_env("RESEND_API_KEY"),
         email_to=get_secret_or_env("EMAIL_TO"),
         email_from=get_secret_or_env("EMAIL_FROM", "Alert Bot <onboarding@resend.dev>"),
-        smtp_host=get_secret_or_env("SMTP_HOST"),
-        smtp_port=int(raw_port) if raw_port.isdigit() else 587,
-        smtp_user=get_secret_or_env("SMTP_USER"),
-        smtp_password=get_secret_or_env("SMTP_PASS"),
         app_password=get_secret_or_env("APP_PASSWORD"),
         streamlit_app_url=get_secret_or_env("STREAMLIT_APP_URL").rstrip("/"),
         default_language=str(yaml_cfg.get("default_language", "de")),

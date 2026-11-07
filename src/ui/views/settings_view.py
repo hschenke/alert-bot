@@ -21,7 +21,7 @@ def render_settings_view(
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Datenbank", repository.backend_name)
     s2.metric("Gemini KI", "✅ Aktiv" if settings.has_gemini_configured else "⚪ Heuristik-Modus")
-    s3.metric("E-Mail-Versand", f"✅ {settings.email_provider.value.upper()}" if settings.has_email_configured else "⚠️ Nicht gesetzt")
+    s3.metric("E-Mail-Versand", "✅ Resend" if settings.has_email_configured else "⚠️ Nicht gesetzt")
     s4.metric("Hintergrund-Worker", "☁️ GitHub Actions" if dispatcher.uses_cloud_worker else "💻 Lokal")
 
     st.divider()

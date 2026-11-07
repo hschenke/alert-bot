@@ -2,7 +2,7 @@
 
 Ein autonomer, KI-gestützter **24/7 Smart-Alert-Bot**, dem du in normaler Sprache sagen kannst, was er für dich im Blick behalten soll – und der dich sofort **per E-Mail benachrichtigt**, sobald deine Bedingung eintritt oder ein neues passendes Angebot online geht.
 
-Aufgebaut auf derselben bewährten **0-€-Cloud-Architektur** wie `news-aggregator-bot` und `research-bot` (**Streamlit Community Cloud + GitHub Actions + Turso LibSQL + Google Gemini + Open-Meteo + Resend/SMTP**) mit striktem Fokus auf **Clean Code, Anti-Spam-Intelligenz und Security**.
+Aufgebaut auf derselben bewährten **0-€-Cloud-Architektur** wie `news-aggregator-bot` und `research-bot` (**Streamlit Community Cloud + GitHub Actions + Turso LibSQL + Google Gemini + Open-Meteo + Resend**) mit striktem Fokus auf **Clean Code, Anti-Spam-Intelligenz und Security**.
 
 ---
 
@@ -56,7 +56,7 @@ Aufgebaut auf derselben bewährten **0-€-Cloud-Architektur** wie `news-aggrega
 - **Zero SQL Duplication**: Ein einziges `SqlAlertRepository` bedient über das `SqlExecutor`-Protokoll sowohl lokales SQLite (WAL) als auch Turso Cloud mit 100 % parametrisierten `?`-Queries.
 - **SSRF- & DNS-Rebinding-Schutz (`ssrf_guard.py` + `SafeHttpFetcher`)**: Validiert jede Ziel-URL und **jeden einzelnen HTTP-Redirect-Hop** gegen Loopback (`127.0.0.1`, `::1`), private RFC-1918-Netze und Cloud-Metadaten (`169.254.169.254`) bei striktem 2-MB-Streaming-Limit.
 - **XSS-sichere HTML-Mails & Signierte Read-Only-Links**: Alle externen Texte/Links werden strikt escaped bzw. auf `http`/`https` geprüft; E-Mails enthalten auf Wunsch ein HMAC-signiertes Lese-Token für den 1-Klick-Aufruf auf dem Smartphone.
-- **Erweiterbare Kanal-Architektur (`NotificationRouter`)**: Startet bewusst schlank mit **E-Mail (Resend / SMTP)**; Adapter für **ntfy.sh Push**, **Telegram Bot** und **Webhooks (Discord/Slack/Home Assistant)** sind architektonisch bereits vorbereitet.
+- **Erweiterbare Kanal-Architektur (`NotificationRouter`)**: Startet bewusst schlank mit **E-Mail (Resend)**; Adapter für **ntfy.sh Push**, **Telegram Bot** und **Webhooks (Discord/Slack/Home Assistant)** sind architektonisch bereits vorbereitet.
 
 ---
 

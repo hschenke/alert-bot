@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from src.config.settings import AppSettings
-from src.domain.enums import ChannelType, DetectorType, EmailProvider
+from src.domain.enums import ChannelType, DetectorType
 from src.domain.models import AlertEvent, AlertRule, DiscoveredItem
 from src.notifications.channels import NotificationRouter
 from src.notifications.email_channel import EmailNotificationChannel
@@ -68,7 +68,6 @@ class TestNotificationsAndWorker:
         mock_post.return_value = mock_resp
 
         settings = AppSettings(
-            email_provider=EmailProvider.RESEND,
             resend_api_key="re_real_looking_test_key",
             email_to="empfaenger@example.de",
         )
