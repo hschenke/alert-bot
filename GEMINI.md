@@ -1,12 +1,22 @@
 # Projekt-Richtlinien für Alert-Bot
 
-## Automatischer Start-Ablauf
-- **Automatisches `git pull`**: Führe zu Beginn jeder neuen Konversation in diesem Projekt zuerst `git pull` aus, um das lokale Repository auf den neuesten Stand zu bringen, und gib kurz Rückmeldung.
+## Grundregel: Automatische Zwei-Wege-Synchronisation (Remote & Lokal)
 
-## Automatischer Abschluss-Ablauf
-- **Qualitätscheck vor jedem Commit**: Führe vor jedem Commit `.venv\Scripts\ruff.exe check .` und `.venv\Scripts\pytest.exe` aus.
-- **Automatisches Committen & `git push`**: Committe abgeschlossene Features/Fixes sauber und pushe sie direkt nach `origin main`, damit GitHub Actions und Streamlit Community Cloud sofort aktuell sind.
+### 1. Vor jeder ersten Anfrage (Sitzungsstart)
+- **Automatisches `git pull`**: Führe zu Beginn jeder neuen Konversation oder ersten Anfrage in diesem Projekt **immer zuerst `git pull`** aus, um alle zwischenzeitlich vom lokalen PC gepushten Änderungen abzurufen.
+- **Rückmeldung**: Gib dem Benutzer immer eine kurze Statusmeldung (z. B. *"Repository aktualisiert"* oder *"Bereits auf dem neuesten Stand"*).
+
+### 2. Nach jedem erfolgreich getesteten Commit (Abschluss)
+- **Qualitätscheck vor jedem Commit**: Führe vor jedem Commit zwingend Linting und Tests aus:
+  - Linux / Remote: `uv run --extra dev ruff check .` und `uv run --extra dev pytest`
+  - Windows / Lokal: `.venv\Scripts\ruff.exe check .` und `.venv\Scripts\pytest.exe`
+- **Automatisches Committen & `git push`**: Committe abgeschlossene Änderungen sauber und führe **direkt im Anschluss `git push origin main`** aus.
+- **Push-Bestätigung an Benutzer**: Informiere den Benutzer kurz, dass die Änderungen nach `origin main` gepusht wurden und er sie auf seinem lokalen PC mit `git pull` abholen kann.
 - **Proaktive Versions-Tag Empfehlung (Semantic Versioning)**: Erhöhe bei neuen Meilensteinen die Version in `src/__version__.py` und setze/empfehle passende SemVer-Tags (`v0.X.0` für Features, `v0.X.Y` für Fixes).
+
+### 3. Spiegelbildlicher Ablauf für den lokalen PC (Benutzer-Workflow)
+- **Vor Beginn lokaler Arbeit**: `git pull` auf dem PC ausführen, um Remote-Änderungen abzuholen.
+- **Nach lokaler Arbeit**: `git push` auf dem PC ausführen, damit der Remote-Agent sofort den aktuellen Stand hat.
 
 ## Proaktive Roadmap-Erinnerung: Weitere Alarm-Kanäle (`ntfy.sh`, `Telegram`, `Webhook`)
 - **Ausdrücklicher Benutzerwunsch**: In `v0.1.x` startet der Bot bewusst mit **E-Mail (Resend)** als aktivem Kanal, während die Kanal-Architektur (`NotificationChannel`-Protokoll in `src/notifications/channels.py`) bereits modular vorbereitet ist.

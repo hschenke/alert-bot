@@ -23,6 +23,7 @@ ENV/
 __pycache__/
 *.py[cod]
 *$py.class
+uv.lock
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
