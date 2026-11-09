@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alert-bot"
-version = "0.1.2"
+version = "0.1.3"
 description = "Autonomer, KI-gestützter 24/7 Alert-Bot mit Streamlit Web-App, Turso Cloud-Persistenz, GitHub Actions Worker und E-Mail-Alarmierung."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "google-genai>=2.30.1,<3.0.0",
+    "google-genai>=2.30.1",
     "pydantic>=2.9.0",
     "requests>=2.32.3",
     "beautifulsoup4>=4.12.3",
@@ -29,6 +29,10 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q --strict-markers"
+filterwarnings = [
+    "ignore:.*invalid escape sequence.*:SyntaxWarning",
+    "ignore:.*invalid escape sequence.*:DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py311"
