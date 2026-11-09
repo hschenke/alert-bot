@@ -12,11 +12,11 @@
   - Windows / Lokal: `.venv\Scripts\ruff.exe check .` und `.venv\Scripts\pytest.exe`
 - **Automatisches Committen & `git push`**: Committe abgeschlossene Änderungen sauber und führe **direkt im Anschluss `git push origin main`** aus.
 - **Push-Bestätigung an Benutzer**: Informiere den Benutzer kurz, dass die Änderungen nach `origin main` gepusht wurden und er sie auf seinem lokalen PC mit `git pull` abholen kann.
-- **Proaktive Versions-Tag Empfehlung (Semantic Versioning)**: Erhöhe bei neuen Meilensteinen die Version in `src/__version__.py` und setze/empfehle passende SemVer-Tags (`v0.X.0` für Features, `v0.X.Y` für Fixes).
+- **Automatisches Versions-Tagging & `git push --tags` (Semantic Versioning)**: Erhöhe bei Bugfixes oder Features die Version synchron in `src/__version__.py` und `pyproject.toml`. Erstelle den Git-Tag **immer automatisch direkt selbst** (`git tag -a v0.X.Y -m "Release v0.X.Y: ..."`) und pushe ihn unmittelbar mit (`git push origin v0.X.Y`), damit Tags remote und lokal ohne manuelle Zwischenschritte synchron sind.
 
 ### 3. Spiegelbildlicher Ablauf für den lokalen PC (Benutzer-Workflow)
-- **Vor Beginn lokaler Arbeit**: `git pull` auf dem PC ausführen, um Remote-Änderungen abzuholen.
-- **Nach lokaler Arbeit**: `git push` auf dem PC ausführen, damit der Remote-Agent sofort den aktuellen Stand hat.
+- **Vor Beginn lokaler Arbeit**: `git pull --tags` auf dem PC ausführen, um alle Remote-Änderungen und Versions-Tags abzuholen.
+- **Nach lokaler Arbeit**: `git push --follow-tags` auf dem PC ausführen, damit der Remote-Agent sofort den aktuellen Stand inklusive etwaiger lokaler Tags hat.
 
 ## Proaktive Roadmap-Erinnerung: Weitere Alarm-Kanäle (`ntfy.sh`, `Telegram`, `Webhook`)
 - **Ausdrücklicher Benutzerwunsch**: In `v0.1.x` startet der Bot bewusst mit **E-Mail (Resend)** als aktivem Kanal, während die Kanal-Architektur (`NotificationChannel`-Protokoll in `src/notifications/channels.py`) bereits modular vorbereitet ist.
