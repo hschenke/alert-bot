@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
+from src.config.constants import AUTH_COOKIE_MAX_AGE_SECONDS
 from src.domain.enums import AuthRole
 from src.domain.exceptions import InputValidationError, SSRFBlockedError
 from src.security.auth import (
@@ -114,9 +117,61 @@ class TestSanitizationAndAuth:
         limiter.reset("ip1")
         assert not limiter.is_locked_out("ip1")[0]
 
-    def test_cookie_helpers_resilient_without_controller(self) -> None:
-        from src.ui.auth_view import _get_cookie_val, _set_cookie_val, clear_auth_cookie
+    def test_token_max_age_and_30_day_persistence(self) -> None:
+        secret = "Geheim123"
+        # Token von vor 2 Tagen (172800 Sekunden)
+        old_timestamp = int(time.time()) - 172800
+        old_token = generate_admin_token(secret, issued_at=old_timestamp)
+
+        # Standard (24h) muss ablehnen
+        assert resolve_credential_role(old_token, secret) == AuthRole.GUEST
+        assert not verify_admin_token(old_token, secret)
+
+        # Mit 30-Tage Gültigkeit muss es akzeptiert werden
+        assert (
+            resolve_credential_role(old_token, secret, max_age_seconds=AUTH_COOKIE_MAX_AGE_SECONDS)
+            == AuthRole.ADMIN
+        )
+        assert verify_admin_token(old_token, secret, max_age_seconds=AUTH_COOKIE_MAX_AGE_SECONDS)
+
+    def test_cookie_helpers_and_storage_scripts(self) -> None:
+        from src.ui.auth_view import (
+            _get_cookie_val,
+            _render_auto_restore_script,
+            _render_clear_storage_script,
+            _render_save_storage_script,
+            _set_cookie_val,
+            clear_auth_cookie,
+        )
 
         assert _get_cookie_val(None) == ""
         _set_cookie_val(None, "some-token")
         clear_auth_cookie()
+
+        # Storage Skripte müssen fehlerfrei und ohne Exceptions ausführbar sein
+        _render_auto_restore_script()
+        _render_clear_storage_script()
+        _render_save_storage_script("invalid-token")  # Muss ignoriert werden (XSS-Schutz)
+        valid_token = generate_admin_token("test-secret")
+        _render_save_storage_script(valid_token)
+
+        # Test mit Mock-Controller: prüft ob expires & same_site übergeben werden
+        class MockController:
+            def __init__(self) -> None:
+                self.set_calls: list[dict] = []
+                self.remove_calls: list[dict] = []
+
+            def set(self, name: str, value: str, **kwargs: Any) -> None:
+                self.set_calls.append({"name": name, "value": value, **kwargs})
+
+            def remove(self, name: str, **kwargs: Any) -> None:
+                self.remove_calls.append({"name": name, **kwargs})
+
+        mock_ctrl = MockController()
+        _set_cookie_val(mock_ctrl, valid_token)
+        assert len(mock_ctrl.set_calls) == 1
+        call = mock_ctrl.set_calls[0]
+        assert call["name"] == "alert_bot_auth"
+        assert call["value"] == valid_token
+        assert call["same_site"] == "lax"
+        assert call["expires"] is not None

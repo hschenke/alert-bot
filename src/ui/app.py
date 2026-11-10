@@ -72,6 +72,9 @@ def run_streamlit_app() -> None:
             ):
                 clear_auth_cookie()
                 st.session_state.pop("auth_token", None)
+                st.session_state["just_logged_out"] = True
+                if "token" in st.query_params:
+                    st.query_params.clear()
                 st.rerun()
 
         if selected_page == "📡 Aktive Wächter":

@@ -68,7 +68,10 @@ def render_settings_view(
         "1. In Streamlit Cloud (`share.streamlit.io`) in den App-Einstellungen die Sichtbarkeit auf **\"Public\"** stellen "
         "(sicher, da Alert-Bot seine eigene Passwort-Schranke hat) ODER in cron-job.org unter *Erweitert* Weiterleitungen aktivieren.\n"
         "2. Auf **[cron-job.org](https://cron-job.org)** einen Job anlegen, der deine Streamlit-URL alle **5 bis 10 Minuten per HTTP GET** aufruft.\n"
-        "3. **Ergebnis:** Deine App schläft nie wieder ein, muss morgens nicht aufgeweckt werden und führt stündliche/geplante Checks zuverlässig aus!"
+        "3. **Ergebnis:** Deine App schläft nie wieder ein, muss morgens nicht aufgeweckt werden und führt stündliche/geplante Checks zuverlässig aus!\n\n"
+        "📱 **Tipp für Smartphones (iOS & Android):** Nach der Anmeldung einfach im Browser **\"Zum Home-Bildschirm hinzufügen\"** "
+        "(iOS Safari: Teilen-Icon → Zum Home-Bildschirm; Android Chrome: Menü → App installieren / Zum Startbildschirm) wählen. "
+        "Alert-Bot öffnet sich dann wie eine native App direkt und dauerhaft angemeldet ohne erneute Passworteingabe!"
     )
 
     st.divider()
