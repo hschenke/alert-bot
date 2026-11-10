@@ -113,3 +113,10 @@ class TestSanitizationAndAuth:
         assert locked and remaining > 0
         limiter.reset("ip1")
         assert not limiter.is_locked_out("ip1")[0]
+
+    def test_cookie_helpers_resilient_without_controller(self) -> None:
+        from src.ui.auth_view import _get_cookie_val, _set_cookie_val, clear_auth_cookie
+
+        assert _get_cookie_val(None) == ""
+        _set_cookie_val(None, "some-token")
+        clear_auth_cookie()

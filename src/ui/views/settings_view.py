@@ -65,8 +65,9 @@ def render_settings_view(
         "Streamlit Community Cloud versetzt Apps nach Inaktivität in den Ruhezustand (\"Zzz\"). "
         "Dadurch pausiert auch der integrierte Hintergrund-Prüfer.\n\n"
         "**Dauerhafte 24/7-Lösung (kostenlos in 1 Minute eingerichtet):**\n"
-        "1. Kostenlosen Account auf **[cron-job.org](https://cron-job.org)** oder **[uptimerobot.com](https://uptimerobot.com)** anlegen.\n"
-        "2. Einen Job anlegen, der deine Streamlit-App-URL (z. B. `https://<deine-app>.streamlit.app`) alle **5 bis 10 Minuten per HTTP GET** aufruft.\n"
+        "1. In Streamlit Cloud (`share.streamlit.io`) in den App-Einstellungen die Sichtbarkeit auf **\"Public\"** stellen "
+        "(sicher, da Alert-Bot seine eigene Passwort-Schranke hat) ODER in cron-job.org unter *Erweitert* Weiterleitungen aktivieren.\n"
+        "2. Auf **[cron-job.org](https://cron-job.org)** einen Job anlegen, der deine Streamlit-URL alle **5 bis 10 Minuten per HTTP GET** aufruft.\n"
         "3. **Ergebnis:** Deine App schläft nie wieder ein, muss morgens nicht aufgeweckt werden und führt stündliche/geplante Checks zuverlässig aus!"
     )
 

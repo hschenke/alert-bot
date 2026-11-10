@@ -5,3 +5,4 @@ beautifulsoup4>=4.12.3
 pyyaml>=6.0.2
 python-dotenv>=1.0.1
 streamlit>=1.40.0
+streamlit-cookies-controller>=0.0.3

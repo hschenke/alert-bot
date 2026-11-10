@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import streamlit as st
-from streamlit_cookies_controller import CookieController
+
+try:
+    from streamlit_cookies_controller import CookieController
+except ImportError:
+    CookieController = None  # type: ignore[assignment, misc]
 
 from src.config.constants import AUTH_COOKIE_MAX_AGE_SECONDS, AUTH_COOKIE_NAME
 from src.config.settings import AppSettings
@@ -25,28 +30,39 @@ def _get_rate_limiter() -> LoginRateLimiter:
     return LoginRateLimiter()
 
 
-def _get_cookie_val(controller: CookieController) -> str:
+def _get_cookie_val(controller: Any | None) -> str:
     try:
-        val = controller.get(AUTH_COOKIE_NAME)
-        return str(val).strip() if val else ""
+        if hasattr(st, "context") and hasattr(st.context, "cookies"):
+            val = st.context.cookies.get(AUTH_COOKIE_NAME)
+            if val:
+                return str(val).strip()
     except Exception as exc:
-        logger.debug("Fehler beim Lesen des Auth-Cookies: %s", exc)
-        return ""
+        logger.debug("Fehler beim Lesen aus st.context.cookies: %s", exc)
+
+    if controller is not None:
+        try:
+            val = controller.get(AUTH_COOKIE_NAME)
+            return str(val).strip() if val else ""
+        except Exception as exc:
+            logger.debug("Fehler beim Lesen des Auth-Cookies via Controller: %s", exc)
+    return ""
 
 
-def _set_cookie_val(controller: CookieController, token: str) -> None:
-    try:
-        controller.set(AUTH_COOKIE_NAME, token, max_age=AUTH_COOKIE_MAX_AGE_SECONDS)
-    except Exception as exc:
-        logger.debug("Fehler beim Setzen des Auth-Cookies: %s", exc)
+def _set_cookie_val(controller: Any | None, token: str) -> None:
+    if controller is not None:
+        try:
+            controller.set(AUTH_COOKIE_NAME, token, max_age=AUTH_COOKIE_MAX_AGE_SECONDS)
+        except Exception as exc:
+            logger.debug("Fehler beim Setzen des Auth-Cookies: %s", exc)
 
 
 def clear_auth_cookie() -> None:
     """Entfernt das Authentifizierungs-Cookie beim Abmelden."""
-    try:
-        CookieController().remove(AUTH_COOKIE_NAME)
-    except Exception as exc:
-        logger.debug("Fehler beim Löschen des Auth-Cookies: %s", exc)
+    if CookieController is not None:
+        try:
+            CookieController().remove(AUTH_COOKIE_NAME)
+        except Exception as exc:
+            logger.debug("Fehler beim Löschen des Auth-Cookies: %s", exc)
 
 
 def enforce_authentication(settings: AppSettings) -> AuthRole:
@@ -61,7 +77,7 @@ def enforce_authentication(settings: AppSettings) -> AuthRole:
         return AuthRole.ADMIN
 
     # 2. Persistentes 30-Tage-Cookie im Browser
-    controller = CookieController()
+    controller = CookieController() if CookieController is not None else None
     cookie_token = _get_cookie_val(controller)
     if cookie_token and verify_admin_token(
         cookie_token,
@@ -87,7 +103,7 @@ def enforce_authentication(settings: AppSettings) -> AuthRole:
     return AuthRole.GUEST
 
 
-def _render_login_form(settings: AppSettings, controller: CookieController) -> None:
+def _render_login_form(settings: AppSettings, controller: Any | None = None) -> None:
     limiter = _get_rate_limiter()
     st.title("🔐 Alert-Bot Anmeldung")
     st.caption("Geschützter Zugriff – bitte Passwort eingeben.")
@@ -99,7 +115,9 @@ def _render_login_form(settings: AppSettings, controller: CookieController) -> N
 
     with st.form("login_form", clear_on_submit=True):
         entered = st.text_input("App-Passwort", type="password")
-        remember_me = st.checkbox("🍪 Auf diesem Gerät 30 Tage angemeldet bleiben", value=True)
+        remember_me = False
+        if controller is not None:
+            remember_me = st.checkbox("🍪 Auf diesem Gerät 30 Tage angemeldet bleiben", value=True)
         submitted = st.form_submit_button("Anmelden", type="primary", use_container_width=True)
 
     if submitted:
