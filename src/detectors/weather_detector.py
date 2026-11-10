@@ -6,9 +6,14 @@ import json
 import logging
 from urllib.parse import quote
 
-from src.detectors.comparators import evaluate_numeric_operator, format_number_de
+from src.detectors.comparators import (
+    evaluate_numeric_operator,
+    format_number_de,
+    parse_localized_float,
+)
 from src.detectors.http_client import SafeHttpFetcher
 from src.detectors.llm_gateway import AlertLLMGateway
+from src.detectors.search_provider import FreeWebSearchProvider, WebSearchProvider
 from src.domain.enums import WeatherMetric
 from src.domain.exceptions import DetectorExecutionError
 from src.domain.models import AlertRule, DetectorFinding
@@ -35,10 +40,12 @@ class WeatherThresholdDetector:
         http_fetcher: SafeHttpFetcher,
         llm_gateway: AlertLLMGateway | None = None,
         metric_prompt: str = "",
+        search_provider: WebSearchProvider | None = None,
     ) -> None:
         self._http = http_fetcher
         self._llm = llm_gateway
         self._metric_prompt = metric_prompt
+        self._search_provider = search_provider or FreeWebSearchProvider(http_fetcher)
 
     def evaluate(self, rule: AlertRule) -> DetectorFinding:
         """Misst aktuellen Wetterwert am Zielort und gleicht ihn mit dem Schwellenwert ab."""
@@ -124,17 +131,32 @@ class WeatherThresholdDetector:
         label: str,
         unit: str,
     ) -> tuple[float, str, str]:
-        if self._llm is None:
-            raise DetectorExecutionError("Kein KI-Fallback konfiguriert.")
-        prompt = (
-            f"Wie hoch ist aktuell die {label} in {location} (in {unit})? "
-            "Nutze aktuelle Wetterdaten aus der Web-Suche."
-        )
-        extracted = self._llm.generate_grounded_structured(
-            prompt=prompt,
-            system_instruction=self._metric_prompt or "Extrahiere den aktuellen Wetter-Messwert präzise.",
-            schema_cls=AiMetricExtraction,
-        )
-        if not extracted.value_found or extracted.numeric_value is None:
-            raise DetectorExecutionError(f"Kein aktueller Wetterwert für '{location}' ermittelbar.")
-        return float(extracted.numeric_value), location, extracted.source_url
+        query = f"Wetter {location} {label} aktuell"
+        search_hits = self._search_provider.search(query)
+        primary_url = search_hits[0].url if search_hits else "https://open-meteo.com/"
+        snippets = "\n".join(f"- {it.title}: {it.summary}" for it in search_hits)
+
+        if self._llm is not None and snippets:
+            prompt = (
+                f"Gesucht: Aktuelle {label} in {location} (in {unit}).\n\n"
+                f"Web-Suchergebnisse:\n{snippets}\n\n"
+                "Extrahiere den aktuellen Messwert wahrheitsgemäß."
+            )
+            try:
+                res = self._llm.generate_structured(
+                    prompt=prompt,
+                    system_instruction=self._metric_prompt or "Extrahiere den aktuellen Wetter-Messwert präzise.",
+                    schema_cls=AiMetricExtraction,
+                )
+                if res.value_found and res.numeric_value is not None:
+                    src = res.source_url or primary_url
+                    return float(res.numeric_value), location, src
+            except Exception as exc:
+                logger.warning("KI-Wetterextraktion fehlgeschlagen (%s), nutze Heuristik: %s", type(exc).__name__, exc)
+
+        if snippets:
+            parsed = parse_localized_float(snippets)
+            if parsed is not None:
+                return parsed, location, primary_url
+
+        raise DetectorExecutionError(f"Kein aktueller Wetterwert für '{location}' ermittelbar.")

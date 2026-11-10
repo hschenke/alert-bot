@@ -59,6 +59,18 @@ def render_settings_view(
     )
 
     st.divider()
+    st.markdown("### ☕ Streamlit Cloud Einschlaf-Schutz (24/7 Keep-Alive)")
+    st.info(
+        "**Warum schläft Streamlit Cloud ein?**\n\n"
+        "Streamlit Community Cloud versetzt Apps nach Inaktivität in den Ruhezustand (\"Zzz\"). "
+        "Dadurch pausiert auch der integrierte Hintergrund-Prüfer.\n\n"
+        "**Dauerhafte 24/7-Lösung (kostenlos in 1 Minute eingerichtet):**\n"
+        "1. Kostenlosen Account auf **[cron-job.org](https://cron-job.org)** oder **[uptimerobot.com](https://uptimerobot.com)** anlegen.\n"
+        "2. Einen Job anlegen, der deine Streamlit-App-URL (z. B. `https://<deine-app>.streamlit.app`) alle **5 bis 10 Minuten per HTTP GET** aufruft.\n"
+        "3. **Ergebnis:** Deine App schläft nie wieder ein, muss morgens nicht aufgeweckt werden und führt stündliche/geplante Checks zuverlässig aus!"
+    )
+
+    st.divider()
     st.markdown("### 🗺️ Vorbereitete Ausbaustufen für weitere Alarm-Kanäle")
     st.caption(
         "Die Kanal-Architektur (`NotificationRouter`) ist bereits modular vorbereitet. "

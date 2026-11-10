@@ -170,14 +170,15 @@ class GeminiAlertGateway:
     ) -> SchemaT:
         """
         Führt Web-Recherche durch und überführt Fakten + verifizierte Quell-URLs
-        typsicher in `schema_cls`. Weicht bei Google-Quota-Limits (429) automatisch
-        auf die kostenfreie DuckDuckGo/News-Suche aus.
+        typsicher in `schema_cls`. Nutzt primär die kostenfreie Multi-Engine-Suche (DuckDuckGo/News),
+        um 429-Quota-Limits des Google-Search-Groundings zu vermeiden.
         """
-        try:
-            grounded_text, citations = self._run_google_search(prompt, system_instruction)
-        except Exception as exc:
-            logger.info("Gemini Search-Grounding nicht verfügbar (%s), nutze FreeWebSearcher.", exc)
-            grounded_text, citations = self._run_free_web_search(prompt)
+        grounded_text, citations = self._run_free_web_search(prompt)
+        if not citations:
+            try:
+                grounded_text, citations = self._run_google_search(prompt, system_instruction)
+            except Exception as exc:
+                logger.info("Google-Search Fallback nicht verfügbar (%s).", exc)
 
         citation_lines = "\n".join(
             f"- {title or 'Quelle'}: {url}" for title, url in citations[:12]
@@ -262,6 +263,7 @@ class GeminiAlertGateway:
                 return text, _extract_verified_citations(interaction)
             except Exception as exc:
                 last_exc = exc
+                err_str = str(exc).lower()
                 logger.warning(
                     "Gemini Google-Search (%s, Versuch %d/%d) fehlgeschlagen: %s",
                     model_name,
@@ -269,6 +271,8 @@ class GeminiAlertGateway:
                     LLM_MAX_ATTEMPTS,
                     exc,
                 )
+                if "429" in err_str or "quota" in err_str:
+                    break
                 if attempt + 1 < LLM_MAX_ATTEMPTS:
                     time.sleep(RETRY_BACKOFF_BASE_SECONDS * (attempt + 1))
 

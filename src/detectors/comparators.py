@@ -52,16 +52,8 @@ def evaluate_text_operator(
     return False
 
 
-def parse_localized_float(raw_text: str) -> float | None:
-    """
-    Extrahiert die erste Dezimalzahl aus deutschen (`1.249,95 €`, `-3,5 °C`)
-    oder englischen (`1,249.95`, `21.4`) Zahlenformaten.
-    """
-    match = _NUMBER_TOKEN_RE.search(raw_text or "")
-    if not match:
-        return None
-
-    token = match.group(0).replace(" ", "").replace("'", "")
+def _convert_token_to_float(raw_token: str) -> float | None:
+    token = raw_token.replace(" ", "").replace("'", "")
     if "," in token and "." in token:
         if token.rfind(",") > token.rfind("."):
             normalized = token.replace(".", "").replace(",", ".")
@@ -80,6 +72,34 @@ def parse_localized_float(raw_text: str) -> float | None:
         return float(normalized)
     except ValueError:
         return None
+
+
+def parse_localized_float(raw_text: str, unit: str = "") -> float | None:
+    """Extrahiert eine Zahl unter Beachtung optionaler Einheiten und Filterung von Jahreszahlen."""
+    clean_text = raw_text or ""
+    clean_unit = unit.strip()
+    if clean_unit:
+        unit_pat = re.compile(
+            rf"([-+]?\d+(?:[.,'\s]\d+)*)\s*(?:{re.escape(clean_unit)}|prozent|euro|€|\$)",
+            re.IGNORECASE,
+        )
+        unit_match = unit_pat.search(clean_text)
+        if unit_match:
+            val = _convert_token_to_float(unit_match.group(1))
+            if val is not None:
+                return val
+
+    candidates: list[float] = []
+    for match in _NUMBER_TOKEN_RE.finditer(clean_text):
+        val = _convert_token_to_float(match.group(0))
+        if val is not None:
+            candidates.append(val)
+
+    if not candidates:
+        return None
+    if len(candidates) > 1 and candidates[0].is_integer() and 1990 <= int(candidates[0]) <= 2099:
+        return candidates[1]
+    return candidates[0]
 
 
 def format_number_de(value: float, decimals: int = 2) -> str:

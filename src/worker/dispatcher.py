@@ -33,8 +33,8 @@ class AlertWorkDispatcher:
         return self._settings.has_github_worker_configured and self._settings.has_turso_configured
 
     def ensure_scheduler_active(self) -> None:
-        """Aktiviert im Lokal-Modus automatisch den eingebetteten Hintergrund-Scheduler."""
-        if not self._settings.has_turso_configured and self._settings.worker_mode != WorkerMode.GITHUB:
+        """Aktiviert den eingebetteten Hintergrund-Scheduler für fällige Wächter."""
+        if self._settings.worker_mode != WorkerMode.GITHUB:
             self._local.ensure_background_scheduler_started()
 
     def check_rule_now(

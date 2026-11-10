@@ -8,7 +8,7 @@ from src.__version__ import __version__
 from src.config.settings import AppSettings, load_app_settings
 from src.domain.enums import AuthRole
 from src.storage.repository import SqlAlertRepository, create_alert_repository
-from src.ui.auth_view import enforce_authentication
+from src.ui.auth_view import clear_auth_cookie, enforce_authentication
 from src.ui.styles import inject_global_styles
 from src.ui.views.active_alerts_view import render_active_alerts_view
 from src.ui.views.events_view import render_events_view
@@ -64,6 +64,14 @@ def run_streamlit_app() -> None:
             st.divider()
             st.caption(f"Speicher: **{repository.backend_name}**")
             if st.button("🔄 Ansicht aktualisieren", use_container_width=True):
+                st.rerun()
+            if (
+                settings.app_password.strip()
+                and role == AuthRole.ADMIN
+                and st.button("🚪 Abmelden", use_container_width=True)
+            ):
+                clear_auth_cookie()
+                st.session_state.pop("auth_token", None)
                 st.rerun()
 
         if selected_page == "📡 Aktive Wächter":

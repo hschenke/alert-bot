@@ -1,6 +1,8 @@
-"""Preis-, Finanz- & Kennzahlen-Wächter über Webseiten-Selektor oder Gemini Web-Suche."""
+"""Preis-, Finanz- & Kennzahlen-Wächter über Webseiten-Selektor oder kostenfreie Web-Suche."""
 
 from __future__ import annotations
+
+import logging
 
 from src.detectors.comparators import (
     evaluate_numeric_operator,
@@ -9,41 +11,58 @@ from src.detectors.comparators import (
 )
 from src.detectors.http_client import SafeHttpFetcher, extract_clean_html_text
 from src.detectors.llm_gateway import AlertLLMGateway
+from src.detectors.search_provider import FreeWebSearchProvider, WebSearchProvider
 from src.domain.exceptions import DetectorExecutionError
 from src.domain.models import AlertRule, DetectorFinding
 from src.domain.schemas import AiMetricExtraction
 
+logger = logging.getLogger(__name__)
+
 
 class PriceThresholdDetector:
-    """Überwacht Produktpreise, Aktien/ETF/Krypto-Kurse oder beliebige Zahlenwerte."""
+    """Überwacht Produktpreise, Aktien/ETF/Krypto-Kurse, Zinssätze oder beliebige Zahlenwerte."""
 
     def __init__(
         self,
         http_fetcher: SafeHttpFetcher,
         llm_gateway: AlertLLMGateway | None,
         system_prompt: str = "",
+        search_provider: WebSearchProvider | None = None,
     ) -> None:
         self._http = http_fetcher
         self._llm = llm_gateway
         self._system_prompt = system_prompt
+        self._search_provider = search_provider or FreeWebSearchProvider(http_fetcher)
 
     def evaluate(self, rule: AlertRule) -> DetectorFinding:
-        """Ermittelt den aktuellen Zahlenwert und gleicht ihn mit dem Zielwert ab."""
-        target = rule.threshold.target_value
-        if target is None:
-            raise DetectorExecutionError("Kein numerischer Zielwert für den Preis-/Zahlen-Wächter gesetzt.")
-
+        """Ermittelt den aktuellen Zahlenwert und gleicht ihn mit Schwellenwert oder Vorwert ab."""
         measured, unit, context, source_url = self._resolve_current_metric(rule)
         final_unit = (rule.threshold.unit or unit).strip()
-        op = rule.threshold.operator
-        met = evaluate_numeric_operator(measured, op, target)
-
         unit_suffix = f" {final_unit}" if final_unit else ""
         measured_str = f"{format_number_de(measured)}{unit_suffix}"
-        target_str = f"{op.value} {format_number_de(target)}{unit_suffix}"
-        state_txt = "erfüllt" if met else "nicht erfüllt"
+        target = rule.threshold.target_value
         detail = f" ({context})" if context else ""
-        summary = f"Aktueller Wert: {measured_str}{detail} – Bedingung {target_str} ist {state_txt}."
+
+        if target is None:
+            prev_val = parse_localized_float(rule.last_value_text)
+            if prev_val is not None:
+                has_changed = abs(measured - prev_val) > 1e-6
+                met = has_changed
+                status_txt = (
+                    f"Wert geändert (vorher: {format_number_de(prev_val)}{unit_suffix})"
+                    if has_changed
+                    else "Wert unverändert"
+                )
+            else:
+                met = rule.notify_on_first_match
+                status_txt = "Initialer Basiswert erfasst"
+            summary = f"Aktueller Wert: {measured_str}{detail} – {status_txt}."
+        else:
+            op = rule.threshold.operator
+            met = evaluate_numeric_operator(measured, op, target)
+            target_str = f"{op.value} {format_number_de(target)}{unit_suffix}"
+            state_txt = "erfüllt" if met else "nicht erfüllt"
+            summary = f"Aktueller Wert: {measured_str}{detail} – Bedingung {target_str} ist {state_txt}."
 
         return DetectorFinding(
             condition_met=met,
@@ -92,21 +111,36 @@ class PriceThresholdDetector:
         return float(res.numeric_value), res.unit, res.context_summary, resp.final_url
 
     def _extract_from_web_search(self, rule: AlertRule) -> tuple[float, str, str, str]:
-        if self._llm is None:
-            raise DetectorExecutionError(
-                "Für Preis-/Kurs-Abfragen ohne direkte URL wird ein GEMINI_API_KEY benötigt."
-            )
         query = rule.search_query.strip() or rule.title
-        prompt = (
-            f"Auftrag: {rule.user_prompt}\n"
-            f"Gesuchte Kennzahl / Asset / Produkt: {query}\n"
-            "Ermittle über Google Search den aktuellsten verifizierten Zahlenwert."
-        )
-        res = self._llm.generate_grounded_structured(
-            prompt=prompt,
-            system_instruction=self._system_prompt or "Extrahiere den aktuellen Zahlenwert wahrheitsgemäß.",
-            schema_cls=AiMetricExtraction,
-        )
-        if not res.value_found or res.numeric_value is None:
-            raise DetectorExecutionError(f"Kein aktueller Zahlenwert zu '{query}' ermittelbar.")
-        return float(res.numeric_value), res.unit, res.context_summary, res.source_url
+        search_hits = self._search_provider.search(query)
+        primary_url = search_hits[0].url if search_hits else ""
+        snippets = "\n".join(f"- {it.title}: {it.summary} ({it.url})" for it in search_hits)
+
+        if self._llm is not None and snippets:
+            prompt = (
+                f"Auftrag: {rule.user_prompt}\n"
+                f"Gesuchte Kennzahl / Asset / Produkt: {query}\n\n"
+                f"Aktuelle Web-Suchergebnisse:\n{snippets}\n\n"
+                "Extrahiere den gesuchten aktuellen Zahlenwert."
+            )
+            try:
+                res = self._llm.generate_structured(
+                    prompt=prompt,
+                    system_instruction=self._system_prompt or "Extrahiere den aktuellen Zahlenwert wahrheitsgemäß.",
+                    schema_cls=AiMetricExtraction,
+                )
+                if res.value_found and res.numeric_value is None:
+                    pass
+                elif res.value_found and res.numeric_value is not None:
+                    src = res.source_url or primary_url
+                    return float(res.numeric_value), res.unit, res.context_summary, src
+            except Exception as exc:
+                logger.warning("KI-Zahlenextraktion fehlgeschlagen (%s), nutze Heuristik: %s", type(exc).__name__, exc)
+
+        if snippets:
+            target_unit = rule.threshold.unit or ("%" if "%" in snippets else "")
+            parsed = parse_localized_float(snippets, target_unit)
+            if parsed is not None:
+                return parsed, target_unit, "aus Web-Suche ermittelt", primary_url
+
+        raise DetectorExecutionError(f"Kein aktueller Zahlenwert zu '{query}' im Web ermittelbar.")
