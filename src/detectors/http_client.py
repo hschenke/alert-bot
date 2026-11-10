@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
@@ -60,15 +61,38 @@ class SafeHttpFetcher:
             return validate_safe_external_url(url, dns_resolver=self._dns_resolver)
         return validate_safe_external_url(url)
 
-    def fetch(self, url: str) -> SafeHttpResponse:
-        """Ruft `url` sicher ab und validiert etwaige HTTP-Weiterleitungen Schritt für Schritt."""
+    def fetch(self, url: str, headers: dict[str, str] | None = None) -> SafeHttpResponse:
+        """Ruft `url` sicher per GET ab und validiert Redirects Schritt für Schritt."""
+        return self._execute_request("GET", url, headers=headers)
+
+    def post(
+        self,
+        url: str,
+        data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> SafeHttpResponse:
+        """Sendet POST-Daten sicher an `url` mit Redirect- und SSRF-Schutz."""
+        return self._execute_request("POST", url, data=data, headers=headers)
+
+    def _execute_request(
+        self,
+        method: str,
+        url: str,
+        data: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> SafeHttpResponse:
         current_url = self._validate(url)
         started = time.monotonic()
+        curr_method = method
+        curr_data = data
 
         for _hop in range(MAX_HTTP_REDIRECTS + 1):
             try:
-                response = self._session.get(
-                    current_url,
+                response = self._session.request(
+                    method=curr_method,
+                    url=current_url,
+                    data=curr_data,
+                    headers=headers,
                     timeout=self._timeout,
                     allow_redirects=False,
                     stream=True,
@@ -82,6 +106,8 @@ class SafeHttpFetcher:
                     if not location:
                         raise DetectorExecutionError("HTTP-Redirect ohne Zieladresse erhalten.")
                     current_url = self._validate(urljoin(current_url, location))
+                    curr_method = "GET"
+                    curr_data = None
                     continue
 
                 body_bytes = self._read_bounded_body(response)

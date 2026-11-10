@@ -169,25 +169,72 @@ class GeminiAlertGateway:
         schema_cls: type[SchemaT],
     ) -> SchemaT:
         """
-        Führt erst eine echte Google-Search-Recherche durch und überführt Fakten + verifizierte
-        Quell-URLs anschließend typsicher in `schema_cls`.
+        Führt Web-Recherche durch und überführt Fakten + verifizierte Quell-URLs
+        typsicher in `schema_cls`. Weicht bei Google-Quota-Limits (429) automatisch
+        auf die kostenfreie DuckDuckGo/News-Suche aus.
         """
-        grounded_text, citations = self._run_google_search(prompt, system_instruction)
+        try:
+            grounded_text, citations = self._run_google_search(prompt, system_instruction)
+        except Exception as exc:
+            logger.info("Gemini Search-Grounding nicht verfügbar (%s), nutze FreeWebSearcher.", exc)
+            grounded_text, citations = self._run_free_web_search(prompt)
+
         citation_lines = "\n".join(
             f"- {title or 'Quelle'}: {url}" for title, url in citations[:12]
         )
         synthesis_prompt = (
             f"Ursprünglicher Prüfauftrag:\n{prompt}\n\n"
             f"Aktuelle Web-Recherche-Ergebnisse:\n{grounded_text}\n\n"
-            f"Verifizierte Quell-URLs aus Google Search:\n{citation_lines or '(keine separaten URLs)'}\n\n"
+            f"Verifizierte Quell-URLs:\n{citation_lines or '(keine separaten URLs)'}\n\n"
             "Überführe dieses Ergebnis jetzt wahrheitsgetreu in das geforderte JSON-Schema. "
             "Verwende ausschließlich tatsächlich gefundene Fakten und echte URLs aus obiger Recherche."
         )
-        return self.generate_structured(
-            prompt=synthesis_prompt,
-            system_instruction=system_instruction,
-            schema_cls=schema_cls,
-        )
+        try:
+            return self.generate_structured(
+                prompt=synthesis_prompt,
+                system_instruction=system_instruction,
+                schema_cls=schema_cls,
+            )
+        except Exception as exc:
+            return self._fallback_grounded_structured(schema_cls, grounded_text, citations, exc)
+
+    @staticmethod
+    def _run_free_web_search(prompt: str) -> tuple[str, list[tuple[str, str]]]:
+        from src.detectors.search_provider import FreeWebSearchProvider
+
+        query = ""
+        for line in prompt.splitlines():
+            if any(k in line for k in ("Suchfokus:", "Suchanfrage:", "Kennzahl / Asset:", "Überwachungsauftrag:")):
+                query = line.split(":", 1)[-1].strip()
+                break
+        clean_q = query or prompt[:120].strip()
+        items = FreeWebSearchProvider().search(clean_q)
+        if not items:
+            return "Keine aktuellen Web-Treffer ermittelbar.", []
+        text_lines = [f"- {it.title}: {it.summary} ({it.url})" for it in items]
+        citations = [(it.title, it.url) for it in items if it.url]
+        return "\n".join(text_lines), citations
+
+    @staticmethod
+    def _fallback_grounded_structured(
+        schema_cls: type[SchemaT],
+        text: str,
+        citations: list[tuple[str, str]],
+        exc: Exception,
+    ) -> SchemaT:
+        name = schema_cls.__name__
+        if "AiSearchEvaluation" in name:
+            from src.domain.schemas import AiDiscoveredMatch
+
+            matches = [AiDiscoveredMatch(title=t, url=u, summary=t) for t, u in citations[:5]]
+            return schema_cls(condition_met=bool(matches), summary=f"{len(matches)} Treffer im Web gefunden.", matches=matches)  # type: ignore[return-value]
+        if "AiMetricExtraction" in name:
+            from src.detectors.comparators import parse_localized_float
+
+            val = parse_localized_float(text)
+            src_url = citations[0][1] if citations else ""
+            return schema_cls(value_found=(val is not None), numeric_value=val, source_url=src_url)  # type: ignore[return-value]
+        raise LLMProviderError(f"KI-Synthese fehlgeschlagen: {exc}") from exc
 
     def _run_google_search(
         self,

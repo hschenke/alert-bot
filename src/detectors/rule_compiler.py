@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -29,6 +30,8 @@ from src.security.sanitization import (
     validate_user_prompt,
 )
 from src.security.ssrf_guard import validate_safe_external_url
+
+logger = logging.getLogger(__name__)
 
 _URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"')]+", re.IGNORECASE)
 _CITY_PREPOSITION_RE = re.compile(
@@ -69,11 +72,14 @@ class AlertRuleCompiler:
         """Erzeugt einen strukturierten Regel-Entwurf per Gemini oder lokaler Heuristik."""
         clean_prompt = validate_user_prompt(user_prompt)
         if self._llm is not None:
-            return self._llm.generate_structured(
-                prompt=f"Benutzerwunsch:\n{clean_prompt}",
-                system_instruction=self._compiler_prompt or "Übersetze den Wunsch in eine präzise Alert-Regel.",
-                schema_cls=CompiledAlertDraft,
-            )
+            try:
+                return self._llm.generate_structured(
+                    prompt=f"Benutzerwunsch:\n{clean_prompt}",
+                    system_instruction=self._compiler_prompt or "Übersetze den Wunsch in eine präzise Alert-Regel.",
+                    schema_cls=CompiledAlertDraft,
+                )
+            except Exception as exc:
+                logger.warning("KI-Regel-Compiler fehlgeschlagen (%s), nutze Heuristik-Fallback: %s", type(exc).__name__, exc)
         return self._heuristic_draft(clean_prompt)
 
     @staticmethod
