@@ -14,18 +14,18 @@ from src.domain.enums import (
 )
 
 DETECTOR_LABELS: dict[DetectorType, str] = {
-    DetectorType.WEATHER_THRESHOLD: "🌡️ Wetter- & Temperatur-Schwellenwert",
-    DetectorType.WEB_SEARCH: "🌍 KI-Websuche & Neue Angebote (z. B. Mietwohnungen / News)",
-    DetectorType.PRICE_THRESHOLD: "💰 Preis-, Finanz- & Kennzahlen-Wächter",
-    DetectorType.PAGE_CHANGE: "📄 Website-Änderungen & Verfügbarkeit",
-    DetectorType.HTTP_API: "🩺 Uptime-, HTTP-Status- & JSON-API-Check",
+    DetectorType.WEATHER_THRESHOLD: "🌡️ Wetter & Temperatur",
+    DetectorType.WEB_SEARCH: "🌍 Web-Radar & Angebote",
+    DetectorType.PRICE_THRESHOLD: "💰 Kennzahlen & Preise",
+    DetectorType.PAGE_CHANGE: "📄 Website-Monitor",
+    DetectorType.HTTP_API: "🩺 HTTP & API-Check",
 }
 
 TRIGGER_LABELS: dict[TriggerMode, str] = {
-    TriggerMode.ON_STATE_CHANGE: "🔄 Bei Zustandswechsel (kein Dauer-Spam solange aktiv)",
-    TriggerMode.EVERY_NEW_ITEM: "🆕 Bei jedem neuen Treffer / Inserat (mit Duplikat-Gedächtnis)",
-    TriggerMode.COOLDOWN: "⏱️ Wiederholt nach Cooldown-Pause",
-    TriggerMode.ONCE: "1️⃣ Einmalig melden & danach automatisch pausieren",
+    TriggerMode.ON_STATE_CHANGE: "🔄 Bei Wert-/Statusänderung",
+    TriggerMode.EVERY_NEW_ITEM: "🆕 Bei neuen Treffern",
+    TriggerMode.COOLDOWN: "⏱️ Mit Cooldown-Pause",
+    TriggerMode.ONCE: "1️⃣ Einmalig melden",
 }
 
 WEATHER_METRIC_LABELS: dict[WeatherMetric, str] = {

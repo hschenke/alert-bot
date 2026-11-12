@@ -37,8 +37,11 @@ prompts:
 
   metric_extract_system_prompt: >-
     Extrahiere aus dem bereitgestellten Webseiten-Text oder aktuellen Suchergebnissen exakt
-    den angefragten aktuellen Zahlenwert (z. B. Preis, Kurs, Messwert). Wenn kein verlässlicher
-    aktueller Zahlenwert ermittelbar ist, setze `value_found` auf false.
+    den aktuell gültigen Zahlenwert (z. B. Preis, Kurs, Beitragssatz, Messwert).
+    WICHTIG: Achte streng auf Aktualität und Jahresangaben! Wähle stets den gegenwärtig gültigen
+    Wert des neuesten Jahres (2026/2027) und ignoriere veraltete historische Werte früherer
+    Jahre (z. B. 2020, 2021) vollständig. Wenn kein verlässlicher aktueller Zahlenwert
+    ermittelbar ist, setze `value_found` auf false.
 
   page_change_system_prompt: >-
     Bewerte objektiv anhand des bisherigen und aktuellen Seitentextes, ob die vom Nutzer

@@ -121,7 +121,9 @@ class PriceThresholdDetector:
                 f"Auftrag: {rule.user_prompt}\n"
                 f"Gesuchte Kennzahl / Asset / Produkt: {query}\n\n"
                 f"Aktuelle Web-Suchergebnisse:\n{snippets}\n\n"
-                "Extrahiere den gesuchten aktuellen Zahlenwert."
+                "Extrahiere den gesuchten aktuellen Zahlenwert.\n"
+                "WICHTIG: Achte zwingend auf das aktuelle Gültigkeitsjahr (2026/2027) und die neuesten Angaben! "
+                "Ignoriere veraltete historische Vorjahreswerte (wie z. B. 2020/2021) vollständig."
             )
             try:
                 res = self._llm.generate_structured(

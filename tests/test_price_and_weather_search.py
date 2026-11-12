@@ -145,3 +145,34 @@ def test_weather_detector_falls_back_to_free_search_on_open_meteo_failure() -> N
     assert finding.measured_value == -1.5
     assert finding.condition_met is True
     assert "erfüllt" in finding.summary
+
+
+def test_price_detector_ignores_outdated_historical_year_rates() -> None:
+    html_with_old_and_new = """
+    <html><body>
+    <div class="result">
+        <a class="result__a" href="https://krankenkassen.example.com/bkk-firmus">BKK firmus Zusatzbeitrag</a>
+        <div class="result__snippet">Historie: 2020 lag der Zusatzbeitrag bei 0,44 %. Aktuell beträgt er 2,18 %.</div>
+    </div>
+    </body></html>
+    """
+    fetcher = DummySearchHttpFetcher({"duckduckgo.com": html_with_old_and_new})
+    detector = PriceThresholdDetector(
+        http_fetcher=fetcher,
+        llm_gateway=None,
+    )
+    rule = AlertRule(
+        id="bkk_recency_rule",
+        title="BKK Firmus Zusatzbeitragssatz überwachen",
+        user_prompt="Alarmiere, wenn sich der Zusatzbeitragssatz von BKK Firmus ändert",
+        detector_type=DetectorType.PRICE_THRESHOLD,
+        search_query="BKK firmus Zusatzbeitrag",
+        threshold=ThresholdSpec(target_value=None, unit="%"),
+        last_value_text="",
+        notify_on_first_match=False,
+    )
+    finding = detector.evaluate(rule)
+    # Muss 2.18 % wählen und nicht den veralteten 2020-Wert von 0.44 %
+    assert finding.measured_value == 2.18
+    assert "2,18 %" in finding.measured_display
+

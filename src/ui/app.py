@@ -54,12 +54,33 @@ def run_streamlit_app() -> None:
 
             default_view = str(st.query_params.get("view", "")).strip()
             pages = ["📡 Aktive Wächter", "➕ Neuer Alert", "🔔 Treffer-Historie", "⚙️ System & Kanäle"]
-            default_idx = 2 if default_view == "events" else 0
-            selected_page = (
-                "🔔 Treffer-Historie"
-                if render_events_only
-                else st.radio("Navigation", options=pages, index=default_idx)
-            )
+            if "active_page" not in st.session_state:
+                if render_events_only or default_view == "events":
+                    st.session_state["active_page"] = "🔔 Treffer-Historie"
+                elif default_view == "new":
+                    st.session_state["active_page"] = "➕ Neuer Alert"
+                else:
+                    st.session_state["active_page"] = "📡 Aktive Wächter"
+            elif render_events_only:
+                st.session_state["active_page"] = "🔔 Treffer-Historie"
+
+            if not render_events_only:
+                st.markdown(
+                    "<p style='font-size:0.8rem;font-weight:600;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;'>Navigation</p>",
+                    unsafe_allow_html=True,
+                )
+                for page_name in pages:
+                    is_active = st.session_state["active_page"] == page_name
+                    if st.button(
+                        page_name,
+                        key=f"nav_btn_{page_name}",
+                        type="primary" if is_active else "secondary",
+                        use_container_width=True,
+                    ):
+                        st.session_state["active_page"] = page_name
+                        st.rerun()
+
+            selected_page = st.session_state["active_page"]
 
             st.divider()
             st.caption(f"Speicher: **{repository.backend_name}**")

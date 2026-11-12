@@ -79,10 +79,29 @@ def parse_localized_float(raw_text: str, unit: str = "") -> float | None:
     clean_text = raw_text or ""
     clean_unit = unit.strip()
     if clean_unit:
+        recency_pat = re.compile(
+            rf"(?:aktuell|derzeit|jetzt|heute|2025|2026|2027)\b[^.\n]{{0,60}}?([-+]?\d+(?:[.,'\s]\d+)*)\s*(?:{re.escape(clean_unit)}|prozent|euro|€|\$)",
+            re.IGNORECASE,
+        )
+        rec_match = recency_pat.search(clean_text)
+        if rec_match:
+            val = _convert_token_to_float(rec_match.group(1))
+            if val is not None:
+                return val
+
         unit_pat = re.compile(
             rf"([-+]?\d+(?:[.,'\s]\d+)*)\s*(?:{re.escape(clean_unit)}|prozent|euro|€|\$)",
             re.IGNORECASE,
         )
+        for match in unit_pat.finditer(clean_text):
+            pre_start = max(0, match.start() - 30)
+            prefix = clean_text[pre_start:match.start()].lower()
+            if any(past in prefix for past in ("2018", "2019", "2020", "2021", "2022", "früher", "damals", "ehemals")):
+                continue
+            val = _convert_token_to_float(match.group(1))
+            if val is not None:
+                return val
+
         unit_match = unit_pat.search(clean_text)
         if unit_match:
             val = _convert_token_to_float(unit_match.group(1))
