@@ -176,3 +176,46 @@ def test_price_detector_ignores_outdated_historical_year_rates() -> None:
     assert finding.measured_value == 2.18
     assert "2,18 %" in finding.measured_display
 
+
+def test_price_detector_grounding_guard_overrides_hallucinated_llm_value() -> None:
+    from src.domain.schemas import AiMetricExtraction
+
+    class HallucinatingLLMGateway:
+        def generate_structured(self, prompt: str, system_instruction: str, schema_cls: type) -> AiMetricExtraction:
+            # KI halluziniert 0.44 % aus Vorwissen, obwohl Snippets 2.18 % angeben
+            return AiMetricExtraction(
+                value_found=True,
+                numeric_value=0.44,
+                unit="%",
+                context_summary="Zusatzbeitragssatz der BKK firmus im aktuellen Jahr",
+            )
+
+    html_snippets = """
+    <html><body>
+    <div class="result">
+        <a class="result__a" href="https://krankenkassen.example.com/bkk-firmus">BKK firmus Zusatzbeitrag</a>
+        <div class="result__snippet">Die BKK firmus hält den Satz stabil. Aktuell beträgt der Zusatzbeitrag nur 2,18 %.</div>
+    </div>
+    </body></html>
+    """
+    fetcher = DummySearchHttpFetcher({"duckduckgo.com": html_snippets})
+    detector = PriceThresholdDetector(
+        http_fetcher=fetcher,
+        llm_gateway=HallucinatingLLMGateway(),  # type: ignore[arg-type]
+    )
+    rule = AlertRule(
+        id="bkk_grounding_rule",
+        title="BKK Firmus Zusatzbeitragssatz überwachen",
+        user_prompt="Alarmiere, wenn sich der Zusatzbeitragssatz von BKK Firmus ändert",
+        detector_type=DetectorType.PRICE_THRESHOLD,
+        search_query="BKK firmus Zusatzbeitragssatz aktuell",
+        threshold=ThresholdSpec(target_value=None, unit="%"),
+        last_value_text="",
+        notify_on_first_match=False,
+    )
+    finding = detector.evaluate(rule)
+    # Grounding-Guard muss die Halluzination (0.44) abwehren und den echten Web-Wert (2.18) nehmen!
+    assert finding.measured_value == 2.18
+    assert "2,18 %" in finding.measured_display
+
+

@@ -115,15 +115,17 @@ class PriceThresholdDetector:
         search_hits = self._search_provider.search(query)
         primary_url = search_hits[0].url if search_hits else ""
         snippets = "\n".join(f"- {it.title}: {it.summary} ({it.url})" for it in search_hits)
+        target_unit = rule.threshold.unit or ("%" if "%" in snippets else "")
+        heuristic_num = parse_localized_float(snippets, target_unit) if snippets else None
 
         if self._llm is not None and snippets:
             prompt = (
                 f"Auftrag: {rule.user_prompt}\n"
                 f"Gesuchte Kennzahl / Asset / Produkt: {query}\n\n"
                 f"Aktuelle Web-Suchergebnisse:\n{snippets}\n\n"
-                "Extrahiere den gesuchten aktuellen Zahlenwert.\n"
-                "WICHTIG: Achte zwingend auf das aktuelle Gültigkeitsjahr (2026/2027) und die neuesten Angaben! "
-                "Ignoriere veraltete historische Vorjahreswerte (wie z. B. 2020/2021) vollständig."
+                "STRIKTE REGEL: Die gesuchte Zahl MUSS zwingend und wörtlich in den obigen Suchergebnissen vorkommen! "
+                "Verwende NIEMALS dein Trainingswissen oder veraltete historische Zahlen (wie 0,44 %).\n"
+                "Extrahiere den gesuchten aktuellen Zahlenwert aus den Suchergebnissen."
             )
             try:
                 res = self._llm.generate_structured(
@@ -131,18 +133,37 @@ class PriceThresholdDetector:
                     system_instruction=self._system_prompt or "Extrahiere den aktuellen Zahlenwert wahrheitsgemäß.",
                     schema_cls=AiMetricExtraction,
                 )
-                if res.value_found and res.numeric_value is None:
-                    pass
-                elif res.value_found and res.numeric_value is not None:
+                if res.value_found and res.numeric_value is not None:
+                    val = float(res.numeric_value)
+                    # Grounding-Guard: Prüfe ob der KI-Wert tatsächlich im Web-Text steht
+                    if not self._is_grounded_in_text(val, snippets) and heuristic_num is not None:
+                        logger.warning(
+                            "KI-Wert %s ist nicht in den Such-Snippets enthalten, bevorzuge verifizierten Web-Wert %s.",
+                            val,
+                            heuristic_num,
+                        )
+                        val = heuristic_num
                     src = res.source_url or primary_url
-                    return float(res.numeric_value), res.unit, res.context_summary, src
+                    return val, res.unit or target_unit, res.context_summary or "aus Web-Suche ermittelt", src
             except Exception as exc:
                 logger.warning("KI-Zahlenextraktion fehlgeschlagen (%s), nutze Heuristik: %s", type(exc).__name__, exc)
 
-        if snippets:
-            target_unit = rule.threshold.unit or ("%" if "%" in snippets else "")
-            parsed = parse_localized_float(snippets, target_unit)
-            if parsed is not None:
-                return parsed, target_unit, "aus Web-Suche ermittelt", primary_url
+        if heuristic_num is not None:
+            return heuristic_num, target_unit, "aus Web-Suche ermittelt", primary_url
 
         raise DetectorExecutionError(f"Kein aktueller Zahlenwert zu '{query}' im Web ermittelbar.")
+
+    @staticmethod
+    def _is_grounded_in_text(value: float, text: str) -> bool:
+        if not text:
+            return False
+        de_str = format_number_de(value)
+        clean_val = f"{value:g}"
+        val_2f = f"{value:.2f}"
+        val_2f_de = val_2f.replace(".", ",")
+        return (
+            de_str in text
+            or clean_val in text
+            or val_2f in text
+            or val_2f_de in text
+        )

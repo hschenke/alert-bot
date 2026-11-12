@@ -28,11 +28,11 @@ def render_active_alerts_view(
     role: AuthRole,
 ) -> None:
     """Zeigt KPI-Kennzahlen und steuerbare Karten für alle konfigurierten Wächter."""
-    top_col, action_col = st.columns([3.2, 1.2])
+    top_col, action_col = st.columns([3.5, 1.2], vertical_alignment="center")
     with top_col:
         st.subheader("📡 Aktive Wächter")
     with action_col:
-        if st.button("➕ Neuer Alert", key="top_add_alert_btn", type="primary", use_container_width=True):
+        if st.button("➕ Neuer Alert", key="top_add_alert_btn", use_container_width=True):
             st.session_state["active_page"] = "➕ Neuer Alert"
             st.rerun()
 

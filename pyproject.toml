@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alert-bot"
-version = "0.1.8"
+version = "0.1.9"
 description = "Autonomer, KI-gestützter 24/7 Alert-Bot mit Streamlit Web-App, Turso Cloud-Persistenz, GitHub Actions Worker und E-Mail-Alarmierung."
 readme = "README.md"
 requires-python = ">=3.11"

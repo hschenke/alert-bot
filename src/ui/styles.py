@@ -67,6 +67,20 @@ section[data-testid="stSidebar"] div.stButton > button[kind="secondary"]:hover {
     border-color: rgba(148, 163, 184, 0.3) !important;
     color: #ffffff !important;
 }
+/* Dezenter Aktions-Button im Header (ohne grelle Farben, passend zum Dark-Theme) */
+div[data-testid="stColumn"] div.stButton > button {
+    background: rgba(30, 41, 59, 0.6) !important;
+    border: 1px solid rgba(148, 163, 184, 0.25) !important;
+    color: #e2e8f0 !important;
+    font-weight: 500 !important;
+    border-radius: 8px !important;
+    transition: all 0.15s ease-in-out !important;
+}
+div[data-testid="stColumn"] div.stButton > button:hover {
+    background: rgba(51, 65, 85, 0.8) !important;
+    border-color: rgba(148, 163, 184, 0.45) !important;
+    color: #ffffff !important;
+}
 </style>
 """
 

@@ -24,7 +24,8 @@ def _get_shared_dispatcher(settings: AppSettings) -> AlertWorkDispatcher:
     return dispatcher
 
 
-def _open_repository(settings: AppSettings) -> SqlAlertRepository:
+@st.cache_resource
+def _get_shared_repository(settings: AppSettings) -> SqlAlertRepository:
     return create_alert_repository(settings)
 
 
@@ -40,71 +41,68 @@ def run_streamlit_app() -> None:
     settings = load_app_settings()
     role = enforce_authentication(settings)
     dispatcher = _get_shared_dispatcher(settings)
-    repository = _open_repository(settings)
+    repository = _get_shared_repository(settings)
 
-    try:
-        with st.sidebar:
-            st.title("🔔 Alert-Bot")
-            st.caption(f"v{__version__} • 24/7 Smart Monitoring")
-            if role == AuthRole.READONLY:
-                st.info("🔓 Lese-Ansicht (E-Mail-Direktlink)")
-                render_events_only = True
-            else:
-                render_events_only = False
-
-            default_view = str(st.query_params.get("view", "")).strip()
-            pages = ["📡 Aktive Wächter", "➕ Neuer Alert", "🔔 Treffer-Historie", "⚙️ System & Kanäle"]
-            if "active_page" not in st.session_state:
-                if render_events_only or default_view == "events":
-                    st.session_state["active_page"] = "🔔 Treffer-Historie"
-                elif default_view == "new":
-                    st.session_state["active_page"] = "➕ Neuer Alert"
-                else:
-                    st.session_state["active_page"] = "📡 Aktive Wächter"
-            elif render_events_only:
-                st.session_state["active_page"] = "🔔 Treffer-Historie"
-
-            if not render_events_only:
-                st.markdown(
-                    "<p style='font-size:0.8rem;font-weight:600;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;'>Navigation</p>",
-                    unsafe_allow_html=True,
-                )
-                for page_name in pages:
-                    is_active = st.session_state["active_page"] == page_name
-                    if st.button(
-                        page_name,
-                        key=f"nav_btn_{page_name}",
-                        type="primary" if is_active else "secondary",
-                        use_container_width=True,
-                    ):
-                        st.session_state["active_page"] = page_name
-                        st.rerun()
-
-            selected_page = st.session_state["active_page"]
-
-            st.divider()
-            st.caption(f"Speicher: **{repository.backend_name}**")
-            if st.button("🔄 Ansicht aktualisieren", use_container_width=True):
-                st.rerun()
-            if (
-                settings.app_password.strip()
-                and role == AuthRole.ADMIN
-                and st.button("🚪 Abmelden", use_container_width=True)
-            ):
-                clear_auth_cookie()
-                st.session_state.pop("auth_token", None)
-                st.session_state["just_logged_out"] = True
-                if "token" in st.query_params:
-                    st.query_params.clear()
-                st.rerun()
-
-        if selected_page == "📡 Aktive Wächter":
-            render_active_alerts_view(repository, dispatcher, role)
-        elif selected_page == "➕ Neuer Alert":
-            render_new_alert_view(settings, repository, dispatcher)
-        elif selected_page == "🔔 Treffer-Historie":
-            render_events_view(repository)
+    with st.sidebar:
+        st.title("🔔 Alert-Bot")
+        st.caption(f"v{__version__} • 24/7 Smart Monitoring")
+        if role == AuthRole.READONLY:
+            st.info("🔓 Lese-Ansicht (E-Mail-Direktlink)")
+            render_events_only = True
         else:
-            render_settings_view(settings, repository, dispatcher)
-    finally:
-        repository.close()
+            render_events_only = False
+
+        default_view = str(st.query_params.get("view", "")).strip()
+        pages = ["📡 Aktive Wächter", "➕ Neuer Alert", "🔔 Treffer-Historie", "⚙️ System & Kanäle"]
+        if "active_page" not in st.session_state:
+            if render_events_only or default_view == "events":
+                st.session_state["active_page"] = "🔔 Treffer-Historie"
+            elif default_view == "new":
+                st.session_state["active_page"] = "➕ Neuer Alert"
+            else:
+                st.session_state["active_page"] = "📡 Aktive Wächter"
+        elif render_events_only:
+            st.session_state["active_page"] = "🔔 Treffer-Historie"
+
+        if not render_events_only:
+            st.markdown(
+                "<p style='font-size:0.8rem;font-weight:600;color:#94a3b8;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;'>Navigation</p>",
+                unsafe_allow_html=True,
+            )
+            for page_name in pages:
+                is_active = st.session_state["active_page"] == page_name
+                if st.button(
+                    page_name,
+                    key=f"nav_btn_{page_name}",
+                    type="primary" if is_active else "secondary",
+                    use_container_width=True,
+                ):
+                    st.session_state["active_page"] = page_name
+                    st.rerun()
+
+        selected_page = st.session_state["active_page"]
+
+        st.divider()
+        st.caption(f"Speicher: **{repository.backend_name}**")
+        if st.button("🔄 Ansicht aktualisieren", use_container_width=True):
+            st.rerun()
+        if (
+            settings.app_password.strip()
+            and role == AuthRole.ADMIN
+            and st.button("🚪 Abmelden", use_container_width=True)
+        ):
+            clear_auth_cookie()
+            st.session_state.pop("auth_token", None)
+            st.session_state["just_logged_out"] = True
+            if "token" in st.query_params:
+                st.query_params.clear()
+            st.rerun()
+
+    if selected_page == "📡 Aktive Wächter":
+        render_active_alerts_view(repository, dispatcher, role)
+    elif selected_page == "➕ Neuer Alert":
+        render_new_alert_view(settings, repository, dispatcher)
+    elif selected_page == "🔔 Treffer-Historie":
+        render_events_view(repository)
+    else:
+        render_settings_view(settings, repository, dispatcher)
