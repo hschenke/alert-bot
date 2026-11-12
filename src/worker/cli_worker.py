@@ -83,12 +83,18 @@ def run_cli_worker(argv: list[str] | None = None) -> int:
                 triggered_count += 1
             elif result.outcome == CheckOutcome.ERROR:
                 error_count += 1
+            summary_txt = result.finding.summary if result.finding else ""
+            source_txt = result.finding.source_url if result.finding else ""
             logger.info(
-                "Regel '%s' (%s) -> %s (%s)",
+                "Regel '%s' (%s) -> %s (%s) [Query: '%s', URL: '%s', Source: '%s', Summary: '%s']",
                 rule.title,
                 rule.id,
                 result.outcome.value,
                 result.finding.measured_display if result.finding else result.error_message,
+                rule.search_query,
+                rule.target_url,
+                source_txt,
+                summary_txt,
             )
 
         logger.info(

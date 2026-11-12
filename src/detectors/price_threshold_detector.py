@@ -115,8 +115,10 @@ class PriceThresholdDetector:
         search_hits = self._search_provider.search(query)
         primary_url = search_hits[0].url if search_hits else ""
         snippets = "\n".join(f"- {it.title}: {it.summary} ({it.url})" for it in search_hits)
+        logger.info("Web-Suche '%s': %d Treffer, Snippets: %s", query, len(search_hits), snippets[:400])
         target_unit = rule.threshold.unit or ("%" if "%" in snippets else "")
         heuristic_num = parse_localized_float(snippets, target_unit) if snippets else None
+        logger.info("Heuristik für '%s': %s (Einheit: '%s')", query, heuristic_num, target_unit)
 
         # 1. Bevorzuge direkt verifizierte Web-Treffer mit Aktualitätsbezug (z. B. "aktuell 2,18 %"):
         # spart 1-3s KI-Latenz, schont Quota und eliminiert Halluzinationen zu 100%.
