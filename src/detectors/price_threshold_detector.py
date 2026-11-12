@@ -118,13 +118,19 @@ class PriceThresholdDetector:
         target_unit = rule.threshold.unit or ("%" if "%" in snippets else "")
         heuristic_num = parse_localized_float(snippets, target_unit) if snippets else None
 
+        # 1. Bevorzuge direkt verifizierte Web-Treffer mit Aktualitätsbezug (z. B. "aktuell 2,18 %"):
+        # spart 1-3s KI-Latenz, schont Quota und eliminiert Halluzinationen zu 100%.
+        if heuristic_num is not None and self._is_grounded_in_text(heuristic_num, snippets):
+            return heuristic_num, target_unit, "aus Web-Suche ermittelt", primary_url
+
+        # 2. Falls Heuristik keinen eindeutigen Wert fand, KI zur Extraktion nutzen:
         if self._llm is not None and snippets:
             prompt = (
                 f"Auftrag: {rule.user_prompt}\n"
                 f"Gesuchte Kennzahl / Asset / Produkt: {query}\n\n"
                 f"Aktuelle Web-Suchergebnisse:\n{snippets}\n\n"
                 "STRIKTE REGEL: Die gesuchte Zahl MUSS zwingend und wörtlich in den obigen Suchergebnissen vorkommen! "
-                "Verwende NIEMALS dein Trainingswissen oder veraltete historische Zahlen (wie 0,44 %).\n"
+                "Verwende NIEMALS dein Trainingswissen oder veraltete historische Zahlen.\n"
                 "Extrahiere den gesuchten aktuellen Zahlenwert aus den Suchergebnissen."
             )
             try:
@@ -135,18 +141,12 @@ class PriceThresholdDetector:
                 )
                 if res.value_found and res.numeric_value is not None:
                     val = float(res.numeric_value)
-                    # Grounding-Guard: Prüfe ob der KI-Wert tatsächlich im Web-Text steht
-                    if not self._is_grounded_in_text(val, snippets) and heuristic_num is not None:
-                        logger.warning(
-                            "KI-Wert %s ist nicht in den Such-Snippets enthalten, bevorzuge verifizierten Web-Wert %s.",
-                            val,
-                            heuristic_num,
-                        )
-                        val = heuristic_num
-                    src = res.source_url or primary_url
-                    return val, res.unit or target_unit, res.context_summary or "aus Web-Suche ermittelt", src
+                    if self._is_grounded_in_text(val, snippets):
+                        src = res.source_url or primary_url
+                        return val, res.unit or target_unit, res.context_summary or "aus Web-Suche ermittelt", src
+                    logger.warning("KI-Wert %s ist nicht in den Such-Snippets enthalten (Halluzination verworfen).", val)
             except Exception as exc:
-                logger.warning("KI-Zahlenextraktion fehlgeschlagen (%s), nutze Heuristik: %s", type(exc).__name__, exc)
+                logger.warning("KI-Zahlenextraktion fehlgeschlagen (%s): %s", type(exc).__name__, exc)
 
         if heuristic_num is not None:
             return heuristic_num, target_unit, "aus Web-Suche ermittelt", primary_url

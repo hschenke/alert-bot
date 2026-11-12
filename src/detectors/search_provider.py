@@ -100,14 +100,14 @@ class FreeWebSearchProvider:
         soup = BeautifulSoup(html_text or "", "html.parser")
         items: list[DiscoveredItem] = []
         for a_tag in soup.select("a.result__a")[:limit]:
-            title = a_tag.get_text(strip=True)
+            title = a_tag.get_text(" ", strip=True)
             url = _extract_target_url(a_tag.get("href", ""))
             parent = a_tag.find_parent(class_="result") or a_tag.find_parent("div")
             snippet = ""
             if parent:
                 snip_node = parent.select_one(".result__snippet")
                 if snip_node:
-                    snippet = snip_node.get_text(strip=True)[:280]
+                    snippet = snip_node.get_text(" ", strip=True)[:280]
             if title:
                 fp = compute_item_fingerprint(url, title)
                 items.append(DiscoveredItem(fingerprint=fp, title=title[:180], url=url, summary=snippet))
@@ -120,9 +120,9 @@ class FreeWebSearchProvider:
         snippets = soup.select(".result-snippet")
         items: list[DiscoveredItem] = []
         for idx, a_tag in enumerate(links[:limit]):
-            title = a_tag.get_text(strip=True)
+            title = a_tag.get_text(" ", strip=True)
             url = _extract_target_url(a_tag.get("href", ""))
-            snippet = snippets[idx].get_text(strip=True)[:280] if idx < len(snippets) else ""
+            snippet = snippets[idx].get_text(" ", strip=True)[:280] if idx < len(snippets) else ""
             if title:
                 fp = compute_item_fingerprint(url, title)
                 items.append(DiscoveredItem(fingerprint=fp, title=title[:180], url=url, summary=snippet))

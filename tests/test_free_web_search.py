@@ -100,6 +100,22 @@ class TestFreeWebSearchProvider:
         assert items[0].url == "https://immo.example.com/wohnung1"
         assert "950 Euro" in items[0].summary
 
+    def test_parses_ddg_html_preserves_spaces_between_tags(self) -> None:
+        html = """
+        <html><body>
+        <div class="result">
+            <a class="result__a" href="https://example.com/test">Titel <b>Hervorhebung</b> Text</a>
+            <div class="result__snippet">Dieser beträgt <b>aktuell</b> nur <b>2,18 %</b> Zusatzbeitrag.</div>
+        </div>
+        </body></html>
+        """
+        fetcher = MockHttpFetcher({"duckduckgo.com/html": html})
+        provider = FreeWebSearchProvider(http_fetcher=fetcher)
+        items = provider.search("test")
+        assert len(items) == 1
+        assert items[0].title == "Titel Hervorhebung Text"
+        assert items[0].summary == "Dieser beträgt aktuell nur 2,18 % Zusatzbeitrag."
+
     def test_falls_back_to_ddg_lite_when_html_empty(self) -> None:
         fetcher = MockHttpFetcher({"duckduckgo.com/lite": _SAMPLE_DDG_LITE})
         provider = FreeWebSearchProvider(http_fetcher=fetcher)
