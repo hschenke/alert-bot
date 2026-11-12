@@ -96,15 +96,26 @@ def parse_localized_float(raw_text: str, unit: str = "") -> float | None:
         for match in unit_pat.finditer(clean_text):
             pre_start = max(0, match.start() - 30)
             prefix = clean_text[pre_start:match.start()].lower()
-            if any(past in prefix for past in ("2018", "2019", "2020", "2021", "2022", "früher", "damals", "ehemals")):
+            if any(
+                past in prefix
+                for past in (
+                    "2018",
+                    "2019",
+                    "2020",
+                    "2021",
+                    "2022",
+                    "2023",
+                    "2024",
+                    "früher",
+                    "damals",
+                    "ehemals",
+                    "von ",
+                    "zuvor",
+                    "bisher",
+                )
+            ):
                 continue
             val = _convert_token_to_float(match.group(1))
-            if val is not None:
-                return val
-
-        unit_match = unit_pat.search(clean_text)
-        if unit_match:
-            val = _convert_token_to_float(unit_match.group(1))
             if val is not None:
                 return val
 

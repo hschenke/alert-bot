@@ -43,7 +43,36 @@ _SAMPLE_GOOGLE_NEWS_RSS = """<?xml version="1.0" encoding="UTF-8"?>
     <item>
         <title>Neues Wohnbauprojekt in Hamburg Altona gestartet</title>
         <link>https://news.example.com/altona-wohnbau</link>
+        <pubDate>Thu, 12 Nov 2026 09:00:00 GMT</pubDate>
         <description>&lt;p&gt;Bis 2027 entstehen 300 geförderte Wohnungen.&lt;/p&gt;</description>
+    </item>
+</channel>
+</rss>
+"""
+
+_SAMPLE_YAHOO_HTML = """
+<html><body>
+<div class="algo">
+    <h3><a href="https://r.search.yahoo.com/_ylt=123/RU=https%3a%2f%2fwww.bkk-firmus.de%2fzusatzbeitrag/RK=2">Zusatzbeitrag - BKK firmus</a></h3>
+    <div class="compText">Der Zusatzbeitragssatz beträgt aktuell nur 2,18 %.</div>
+</div>
+</body></html>
+"""
+
+_SAMPLE_OLD_GOOGLE_NEWS_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+    <item>
+        <title>Historische Nachricht aus 2020</title>
+        <link>https://news.example.com/2020-news</link>
+        <pubDate>Wed, 09 Dec 2020 08:00:00 GMT</pubDate>
+        <description>Zusatzbeitrag liegt bei 0,44 %.</description>
+    </item>
+    <item>
+        <title>Aktuelle Nachricht aus 2026</title>
+        <link>https://news.example.com/2026-news</link>
+        <pubDate>Mon, 02 Nov 2026 08:00:00 GMT</pubDate>
+        <description>Zusatzbeitrag liegt bei 2,18 %.</description>
     </item>
 </channel>
 </rss>
@@ -133,6 +162,40 @@ class TestFreeWebSearchProvider:
         assert len(items) == 1
         assert "Neues Wohnbauprojekt" in items[0].title
         assert items[0].url == "https://news.example.com/altona-wohnbau"
+
+    def test_parses_yahoo_html_and_unquotes_redirects(self) -> None:
+        fetcher = MockHttpFetcher({"search.yahoo.com": _SAMPLE_YAHOO_HTML})
+        provider = FreeWebSearchProvider(http_fetcher=fetcher)
+        items = provider._search_yahoo("BKK firmus Zusatzbeitrag", limit=5)
+
+        assert len(items) == 1
+        assert "Zusatzbeitrag - BKK firmus" in items[0].title
+        assert items[0].url == "https://www.bkk-firmus.de/zusatzbeitrag"
+        assert "2,18 %" in items[0].summary
+
+    def test_falls_back_to_yahoo_when_duckduckgo_empty(self) -> None:
+        # Simuliert AWS-Szenario: DuckDuckGo gibt leere Ergebnisse, Yahoo liefert Treffer
+        fetcher = MockHttpFetcher({
+            "duckduckgo.com": "<html><body>Keine Treffer</body></html>",
+            "search.yahoo.com": _SAMPLE_YAHOO_HTML,
+        })
+        provider = FreeWebSearchProvider(http_fetcher=fetcher)
+        items = provider.search("BKK firmus Zusatzbeitrag")
+
+        assert len(items) >= 1
+        assert items[0].url == "https://www.bkk-firmus.de/zusatzbeitrag"
+        assert "2,18 %" in items[0].summary
+
+    def test_google_news_filters_out_ancient_articles(self) -> None:
+        fetcher = MockHttpFetcher({"news.google.com": _SAMPLE_OLD_GOOGLE_NEWS_RSS})
+        provider = FreeWebSearchProvider(http_fetcher=fetcher)
+        items = provider._search_google_news("BKK firmus", limit=5)
+
+        # 2020-Artikel (0,44 %) muss gefiltert werden, nur 2026-Artikel bleibt übrig
+        assert len(items) == 1
+        assert "2026" in items[0].title
+        assert "2020" not in items[0].title
+        assert "2,18 %" in items[0].summary
 
 
 class TestWebSearchDetectorQuotaResilience:
