@@ -81,6 +81,13 @@ div[data-testid="stColumn"] div.stButton > button:hover {
     border-color: rgba(148, 163, 184, 0.45) !important;
     color: #ffffff !important;
 }
+/* Kompakte, saubere Darstellung für eingeklappte Alert-Boxen */
+div[data-testid="stExpander"] {
+    border-radius: 10px !important;
+    border-color: rgba(148, 163, 184, 0.22) !important;
+    background: rgba(15, 23, 42, 0.35) !important;
+    margin-bottom: 0.4rem !important;
+}
 </style>
 """
 

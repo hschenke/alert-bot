@@ -191,21 +191,21 @@ def enforce_authentication(settings: AppSettings) -> AuthRole:
 def _render_login_form(settings: AppSettings, controller: Any | None = None) -> None:
     limiter = _get_rate_limiter()
     render_brand_header(
-        "Alert-Bot Anmeldung",
-        subtitle="Geschützter Zugriff – bitte Passwort eingeben.",
+        "Alert-Bot Login",
+        subtitle="Protected Access – please enter password.",
         icon_size_px=38,
         title_size_rem=1.85,
     )
 
     locked, wait_sec = limiter.is_locked_out("web")
     if locked:
-        st.error(f"Zu viele Fehlversuche. Bitte {wait_sec} Sekunden warten.")
+        st.error(f"Too many failed attempts. Please wait {wait_sec}s.")
         return
 
     with st.form("login_form", clear_on_submit=True):
-        entered = st.text_input("App-Passwort", type="password")
-        remember_me = st.checkbox("🍪 Auf diesem Gerät 30 Tage angemeldet bleiben", value=True)
-        submitted = st.form_submit_button("Anmelden", type="primary", use_container_width=True)
+        entered = st.text_input("Password", type="password")
+        remember_me = st.checkbox("🍪 Remember me (30 days)", value=True)
+        submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
 
     if submitted:
         resolved = resolve_credential_role(entered, settings.app_password)
@@ -224,4 +224,4 @@ def _render_login_form(settings: AppSettings, controller: Any | None = None) -> 
                 _render_clear_storage_script()
             st.rerun()
         limiter.record_failure("web")
-        st.error("Ungültiges Passwort.")
+        st.error("Invalid password.")

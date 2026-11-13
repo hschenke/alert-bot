@@ -7,31 +7,31 @@ import streamlit as st
 from src.domain.models import AlertEvent
 from src.security.sanitization import sanitize_display_url
 from src.storage.repository import SqlAlertRepository
-from src.ui.formatters import DETECTOR_LABELS, format_iso_timestamp
+from src.ui.formatters import DETECTOR_LABELS, PAGE_ALERT_HISTORY, format_iso_timestamp
 
 
 def render_events_view(repository: SqlAlertRepository) -> None:
     """Zeigt alle ausgelösten Alarme und deren gefundene Einzel-Angebote an."""
-    st.subheader(":material/notifications: Ausgelöste Alarme & Treffer-Historie")
+    st.subheader(PAGE_ALERT_HISTORY)
 
     focused_id = str(st.query_params.get("event_id", "")).strip()
     if focused_id:
         focused = repository.get_event(focused_id)
         if focused is not None:
-            st.info("Direktansicht aus E-Mail-Benachrichtigung:")
+            st.info("Direct view from email notification:")
             _render_event_card(focused, expanded=True)
             st.divider()
 
     events = repository.list_events(limit=50)
     if not events:
-        st.info("Bisher wurden noch keine Alarme ausgelöst. Sobald eine Bedingung eintritt, erscheinen alle Treffer hier.")
+        st.info("Noch keine Alerts ausgelöst. Sobald eine Bedingung eintritt, erscheinen alle Events hier.")
         return
 
     md_export = _build_markdown_export(events)
     st.download_button(
-        "📥 Treffer-Historie als Markdown herunterladen",
+        "📥 Export Markdown",
         data=md_export.encode("utf-8"),
-        file_name="alert_historie.md",
+        file_name="alert_history.md",
         mime="text/markdown",
     )
 
@@ -49,7 +49,7 @@ def _render_event_card(event: AlertEvent, expanded: bool) -> None:
                 f"{DETECTOR_LABELS[event.detector_type]}"
             )
         with c2:
-            mail_state = "📧 E-Mail zugestellt" if event.notification_succeeded else "💾 Im Dashboard gespeichert"
+            mail_state = "📧 Email Sent" if event.notification_succeeded else "💾 Dashboard Only"
             st.caption(mail_state)
             if event.measured_display:
                 st.markdown(f"**`{event.measured_display}`**")
@@ -58,10 +58,10 @@ def _render_event_card(event: AlertEvent, expanded: bool) -> None:
 
         safe_src = sanitize_display_url(event.source_url)
         if safe_src != "#":
-            st.link_button("🔗 Direkt zur Quelle öffnen", safe_src)
+            st.link_button("🔗 Open Source", safe_src)
 
         if event.items:
-            with st.expander(f"📋 {len(event.items)} gefundene Einzel-Treffer / Inserate", expanded=expanded):
+            with st.expander(f"📋 {len(event.items)} Matched Items", expanded=expanded):
                 for item in event.items:
                     price_suffix = f" — **{item.price_or_value}**" if item.price_or_value else ""
                     st.markdown(f"**{item.title}**{price_suffix}")
@@ -69,17 +69,17 @@ def _render_event_card(event: AlertEvent, expanded: bool) -> None:
                         st.caption(item.summary)
                     safe_item_url = sanitize_display_url(item.url)
                     if safe_item_url != "#":
-                        st.markdown(f"[Zum Angebot öffnen]({safe_item_url})")
+                        st.markdown(f"[Open Item]({safe_item_url})")
                     st.divider()
 
 
 def _build_markdown_export(events: list[AlertEvent]) -> str:
-    lines = ["# Alert-Bot Treffer-Historie", ""]
+    lines = ["# Alert-Bot History", ""]
     for ev in events:
         lines.append(f"## {ev.headline} ({format_iso_timestamp(ev.created_at)})")
         lines.append(ev.summary)
         if ev.source_url:
-            lines.append(f"- Quelle: {ev.source_url}")
+            lines.append(f"- Source: {ev.source_url}")
         for item in ev.items:
             lines.append(f"  - **{item.title}** ({item.price_or_value}): {item.url}")
         lines.append("")

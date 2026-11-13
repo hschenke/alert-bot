@@ -16,26 +16,26 @@ def render_settings_view(
     dispatcher: AlertWorkDispatcher,
 ) -> None:
     """Zeigt Infrastruktur-Status, Testmail-Versand, Takt-Anleitung und geplante Kanäle."""
-    st.subheader("⚙️ Systemstatus, Taktung & Kanäle")
+    st.subheader("⚙️ Settings & Channels")
 
     s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Datenbank", repository.backend_name)
-    s2.metric("Gemini KI", "✅ Aktiv" if settings.has_gemini_configured else "⚪ Heuristik-Modus")
-    s3.metric("E-Mail-Versand", "✅ Resend" if settings.has_email_configured else "⚠️ Nicht gesetzt")
-    s4.metric("Hintergrund-Worker", "☁️ GitHub Actions" if dispatcher.uses_cloud_worker else "💻 Lokal")
+    s1.metric("Database", repository.backend_name)
+    s2.metric("Gemini AI", "✅ Active" if settings.has_gemini_configured else "⚪ Heuristic")
+    s3.metric("Email (Resend)", "✅ Ready" if settings.has_email_configured else "⚠️ Not set")
+    s4.metric("Worker", "☁️ GitHub Actions" if dispatcher.uses_cloud_worker else "💻 Local")
 
     st.divider()
-    st.markdown("### 📧 E-Mail-Benachrichtigung testen")
+    st.markdown("### 📧 Test Email")
     col_mail, col_btn = st.columns([3, 1.2])
     with col_mail:
         test_recipient = st.text_input(
-            "Zieladresse für Testmail",
+            "Recipient Email",
             value=settings.email_to,
-            placeholder="deine-adresse@example.com",
+            placeholder="you@example.com",
         )
     with col_btn:
         st.write("")
-        if st.button("📨 Test-Mail senden", use_container_width=True):
+        if st.button("📨 Send Test Email", use_container_width=True):
             ok, info = EmailNotificationChannel(settings).send_test_email(test_recipient)
             if ok:
                 st.success(info)
@@ -43,50 +43,50 @@ def render_settings_view(
                 st.error(info)
 
     st.divider()
-    st.markdown("### ⏱️ 15–60 Min. Automatik + optionaler 1–5 Min. Echtzeit-Takt (0 €)")
+    st.markdown("### ⏱️ Cron & High-Frequency Polling (1–5m via GitHub Actions, 0 €)")
     st.markdown(
         "Standardmäßig prüft `.github/workflows/check_alerts.yaml` kostenlos über GitHub Actions alle **15 Minuten** "
-        "sämtliche fälligen Wächter. Wenn du für einzelne Regeln einen **punktgenauen 1–5-Minuten-Takt** ohne "
-        "GitHub-Cron-Verzögerung möchtest, kannst du den Workflow kostenlos auf **[cron-job.org](https://cron-job.org)** antriggern:"
+        "sämtliche fälligen Alerts. Für ein **punktgenaues 1–5m-Interval** ohne "
+        "GitHub-Cron-Delay lässt sich der Workflow kostenlos über **[cron-job.org](https://cron-job.org)** triggern:"
     )
     st.code(
         f"POST https://api.github.com/repos/{settings.github_repo}/actions/workflows/{settings.github_workflow_file}/dispatches\n"
         "Headers:\n"
         "  Accept: application/vnd.github+json\n"
-        "  Authorization: Bearer <DEIN_FINE_GRAINED_GITHUB_TOKEN>\n"
+        "  Authorization: Bearer <YOUR_FINE_GRAINED_GITHUB_TOKEN>\n"
         'Body (JSON):\n  {"ref": "main", "inputs": {"rule_id": "", "force": "false"}}',
         language="http",
     )
 
     st.divider()
-    st.markdown("### ☕ Streamlit Cloud Einschlaf-Schutz (24/7 Keep-Alive)")
+    st.markdown("### ☕ Streamlit Cloud Keep-Alive (24/7 Uptime)")
     st.info(
         "**Warum schläft Streamlit Cloud ein?**\n\n"
-        "Streamlit Community Cloud versetzt Apps nach Inaktivität in den Ruhezustand (\"Zzz\"). "
-        "Dadurch pausiert auch der integrierte Hintergrund-Prüfer.\n\n"
+        "Streamlit Community Cloud versetzt Apps nach Inaktivität in den Sleep-Mode (\"Zzz\"). "
+        "Dadurch pausiert auch der integrierte Background-Worker.\n\n"
         "**Dauerhafte 24/7-Lösung (kostenlos in 1 Minute eingerichtet):**\n"
-        "1. In Streamlit Cloud (`share.streamlit.io`) in den App-Einstellungen die Sichtbarkeit auf **\"Public\"** stellen "
-        "(sicher, da Alert-Bot seine eigene Passwort-Schranke hat) ODER in cron-job.org unter *Erweitert* Weiterleitungen aktivieren.\n"
-        "2. Auf **[cron-job.org](https://cron-job.org)** einen Job anlegen, der deine Streamlit-URL alle **5 bis 10 Minuten per HTTP GET** aufruft.\n"
-        "3. **Ergebnis:** Deine App schläft nie wieder ein, muss morgens nicht aufgeweckt werden und führt stündliche/geplante Checks zuverlässig aus!\n\n"
-        "📱 **Tipp für Smartphones (iOS & Android):** Nach der Anmeldung einfach im Browser **\"Zum Home-Bildschirm hinzufügen\"** "
-        "(iOS Safari: Teilen-Icon → Zum Home-Bildschirm; Android Chrome: Menü → App installieren / Zum Startbildschirm) wählen. "
-        "Alert-Bot öffnet sich dann wie eine native App direkt und dauerhaft angemeldet ohne erneute Passworteingabe!"
+        "1. In Streamlit Cloud (`share.streamlit.io`) die Sichtbarkeit auf **\"Public\"** stellen "
+        "(sicher durch eigene Passwort-Auth) ODER in cron-job.org unter *Advanced* Redirects erlauben.\n"
+        "2. Auf **[cron-job.org](https://cron-job.org)** einen Job anlegen, der die Streamlit-URL alle **5–10m per HTTP GET** pingt.\n"
+        "3. **Ergebnis:** Die App bleibt dauerhaft wach und führt alle geplanten Checks zuverlässig aus!\n\n"
+        "📱 **Mobile App Shortcut (iOS & Android):** Nach dem Login im Browser **\"Zum Home-Bildschirm hinzufügen\"** "
+        "(iOS Safari: Share → Add to Home Screen; Android Chrome: Menu → Install App) wählen – "
+        "Alert-Bot startet dann wie eine native App und bleibt angemeldet!"
     )
 
     st.divider()
-    st.markdown("### 🗺️ Vorbereitete Ausbaustufen für weitere Alarm-Kanäle")
+    st.markdown("### 🗺️ Notification Channels Roadmap")
     st.caption(
-        "Die Kanal-Architektur (`NotificationRouter`) ist bereits modular vorbereitet. "
-        "Sobald deine E-Mail-Alerts rund laufen, können wir jederzeit folgende 0-€-Kanäle zuschalten:"
+        "Der `NotificationRouter` ist bereits modular aufgebaut. "
+        "Sobald deine Email-Alerts rund laufen, lassen sich folgende 0-€-Channels jederzeit ergänzen:"
     )
     r1, r2, r3 = st.columns(3)
     with r1, st.container(border=True):
         st.markdown("#### 📱 ntfy.sh Push")
-        st.caption("Sofort-Push auf iOS & Android mit Notfall-Prioritätsstufen – komplett ohne Account nutzbar.")
+        st.caption("Instant Push auf iOS & Android mit Priority Levels – komplett ohne Account.")
     with r2, st.container(border=True):
         st.markdown("#### 💬 Telegram Bot")
-        st.caption("Echtzeit-Nachricht aufs Smartphone inklusive anklickbarer Angebots-Buttons.")
+        st.caption("Realtime Message aufs Smartphone inkl. direkter Deep-Links.")
     with r3, st.container(border=True):
         st.markdown("#### 🔗 Webhook / Discord / Slack")
-        st.caption("Generischer JSON-POST für Discord, Slack, Microsoft Teams oder Home Assistant.")
+        st.caption("Generischer JSON-POST für Discord, Slack, MS Teams oder Home Assistant.")

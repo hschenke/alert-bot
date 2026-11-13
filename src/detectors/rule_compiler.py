@@ -152,7 +152,7 @@ class AlertRuleCompiler:
             city = city_match.group(1).strip() if city_match else "Berlin"
             target = number_val if number_val is not None else 20.0
             return CompiledAlertDraft(
-                title=f"Wetter-Wächter: {city} ({op} {target:g} °C)",
+                title=f"Weather Alert: {city} ({op} {target:g} °C)",
                 detector_type=DetectorType.WEATHER_THRESHOLD.value,
                 condition_description=prompt,
                 location_name=city,
@@ -166,7 +166,7 @@ class AlertRuleCompiler:
 
         if found_url and number_val is not None and any(w in lower for w in ("€", "euro", "preis", "usd", "kurs")):
             return CompiledAlertDraft(
-                title=f"Preis-Wächter ({op} {number_val:g})",
+                title=f"Price Alert ({op} {number_val:g})",
                 detector_type=DetectorType.PRICE_THRESHOLD.value,
                 condition_description=prompt,
                 target_url=found_url,
@@ -179,7 +179,7 @@ class AlertRuleCompiler:
 
         if found_url:
             return CompiledAlertDraft(
-                title=f"Website-Wächter: {found_url[:55]}",
+                title=f"Page Change: {found_url[:55]}",
                 detector_type=DetectorType.PAGE_CHANGE.value,
                 condition_description=prompt,
                 target_url=found_url,

@@ -21,6 +21,7 @@ from src.storage.repository import SqlAlertRepository
 from src.ui.formatters import (
     DETECTOR_LABELS,
     OPERATOR_LABELS,
+    PAGE_NEW_ALERT,
     TRIGGER_LABELS,
     WEATHER_METRIC_LABELS,
     format_interval_label,
@@ -28,19 +29,19 @@ from src.ui.formatters import (
 from src.worker.dispatcher import AlertWorkDispatcher
 
 _QUICK_TEMPLATES: dict[str, str] = {
-    "🌡️ Temperatur an Ort überwachen": (
+    "🌡️ Weather Alert": (
         "Beobachte die Temperatur in Freiburg und teile mir per E-Mail mit, "
         "sobald sie 22 °C erreicht oder überschreitet."
     ),
-    "🏠 Neue Mietwohnungen in einer Stadt": (
+    "🏠 Apartment Search": (
         "Schaue nach neuen 3-Zimmer-Mietwohnungen in Berlin-Mahlsdorf bis 1.300 € Warmmiete "
         "und sende eine E-Mail, sobald ein neues Inserat online ist."
     ),
-    "💰 Preis- oder Kurs-Wecker": (
+    "💰 Price Alert": (
         "Überwache den aktuellen Goldpreis in Euro je Feinunze im Web und melde dich, "
         "sobald er unter 2.400 € fällt."
     ),
-    "📄 Webseite auf Änderung / freie Termine prüfen": (
+    "📄 Page Change": (
         "Überwache https://example.com alle 15 Minuten auf inhaltliche Änderungen "
         "oder neu verfügbare Termine."
     ),
@@ -58,16 +59,16 @@ def render_new_alert_view(
     dispatcher: AlertWorkDispatcher,
 ) -> None:
     """Rendert den Freitext-Assistenten und den transparenten Regel-Konfigurator."""
-    st.subheader("➕ Neuen Alert-Wächter erstellen")
+    st.subheader(PAGE_NEW_ALERT)
     st.caption(
-        "Beschreibe in normaler Sprache, was beobachtet werden soll – der KI-Assistent wählt "
-        "automatisch die optimale Prüfmethode (Open-Meteo Wetter, Google-Search-Radar, Preis- oder Seiten-Check)."
+        "Beschreibe in normaler Sprache, was überwacht werden soll – der AI-Compiler wählt "
+        "automatisch den passenden Detector (Weather, Web Search, Price oder Page Change)."
     )
 
     _render_template_buttons()
 
     prompt_val = st.text_area(
-        "Was soll der Alert-Bot für dich überwachen?",
+        "Prompt",
         key="draft_user_prompt",
         height=95,
         placeholder=(
@@ -78,10 +79,10 @@ def render_new_alert_view(
 
     col_ai, col_reset = st.columns([3, 1])
     with col_ai:
-        if st.button("✨ Aus Freitext konfigurieren", type="secondary", use_container_width=True):
+        if st.button("✨ AI Auto-Config", type="secondary", use_container_width=True):
             _compile_into_session(settings, prompt_val)
     with col_reset:
-        if st.button("🔄 Zurücksetzen", use_container_width=True):
+        if st.button("🔄 Reset", use_container_width=True):
             st.session_state.pop("compiled_draft", None)
             st.rerun()
 
@@ -90,7 +91,7 @@ def render_new_alert_view(
 
 
 def _render_template_buttons() -> None:
-    st.markdown("**Schnell-Beispiele zum Ausprobieren:**")
+    st.markdown("**Quick Templates:**")
     cols = st.columns(2)
     for idx, (label, sample_text) in enumerate(_QUICK_TEMPLATES.items()):
         with cols[idx % 2]:
@@ -101,11 +102,11 @@ def _render_template_buttons() -> None:
 
 def _compile_into_session(settings: AppSettings, raw_prompt: str) -> None:
     try:
-        with st.spinner("Konfiguriere passenden Wächter..."):
+        with st.spinner("Compiling alert rule..."):
             compiler = _build_compiler(settings)
             draft = compiler.compile_from_prompt(raw_prompt, settings.email_to)
             st.session_state["compiled_draft"] = draft
-            st.success(f"Vorschlag erstellt: **{draft.title}** – du kannst alle Details unten prüfen & anpassen.")
+            st.success(f"Draft erstellt: **{draft.title}** – Details unten prüfen & bei Bedarf anpassen.")
     except AlertBotError as exc:
         st.error(str(exc))
 
@@ -129,7 +130,7 @@ def _render_rule_editor_form(
         DetectorType.WEATHER_THRESHOLD,
     )
     selected_det = st.selectbox(
-        "Überwachungs-Typ",
+        "Detector",
         options=det_options,
         index=det_options.index(default_det),
         format_func=lambda d: DETECTOR_LABELS[d],
@@ -138,12 +139,12 @@ def _render_rule_editor_form(
     with st.form("save_alert_rule_form"):
         c1, c2 = st.columns([2, 1])
         with c1:
-            title = st.text_input("Name des Wächters", value=draft.title, placeholder="z. B. Temperatur Freiburg >= 22 °C")
+            title = st.text_input("Alert Name", value=draft.title, placeholder="z. B. Temperatur Freiburg >= 22 °C")
         with c2:
             presets = list(INTERVAL_PRESETS_MINUTES)
             nearest = min(presets, key=lambda p: abs(p - int(draft.suggested_interval_minutes or 30)))
             interval = st.selectbox(
-                "Prüf-Intervall",
+                "Interval",
                 options=presets,
                 index=presets.index(nearest),
                 format_func=format_interval_label,
@@ -154,7 +155,7 @@ def _render_rule_editor_form(
         )
 
         condition_desc = st.text_input(
-            "Auslöse-Bedingung (für KI-Kontext & E-Mail-Zusammenfassung)",
+            "Condition (AI Context & Email Summary)",
             value=draft.condition_description or prompt_val,
         )
 
@@ -167,14 +168,14 @@ def _render_rule_editor_form(
                 else next((t for t in trig_options if t.value == draft.trigger_mode), TriggerMode.ON_STATE_CHANGE)
             )
             trigger_mode = st.selectbox(
-                "Benachrichtigungs-Modus",
+                "Trigger Mode",
                 options=trig_options,
                 index=trig_options.index(default_trig),
                 format_func=lambda t: TRIGGER_LABELS[t],
             )
         with t2:
             notify_email = st.text_input(
-                "Empfänger-E-Mail (leer = Standard aus Einstellungen)",
+                "Notify Email (blank = default)",
                 value=settings.email_to,
                 placeholder="name@example.com",
             )
@@ -182,13 +183,13 @@ def _render_rule_editor_form(
         notify_first = True
         if trigger_mode == TriggerMode.EVERY_NEW_ITEM:
             notify_first = st.checkbox(
-                "Schon beim allerersten Check vorhandene Treffer per E-Mail senden (sonst erst ab dem nächsten neuen Inserat)",
+                "Vorhandene Treffer beim ersten Check direkt senden (sonst erst ab neuen Items)",
                 value=True,
             )
 
-        run_immediately = st.checkbox("Sofort nach dem Anlegen ersten Live-Check ausführen", value=True)
+        run_immediately = st.checkbox("Run initial Live Check immediately", value=True)
         submitted = st.form_submit_button(
-            "🚀 Alert-Wächter aktivieren",
+            "🚀 Create Alert",
             type="primary",
             use_container_width=True,
         )
@@ -238,27 +239,27 @@ def _render_detector_specific_inputs(
     if detector == DetectorType.WEATHER_THRESHOLD:
         w1, w2, w3, w4 = st.columns([2, 2, 2, 1.5])
         with w1:
-            location_name = st.text_input("Ort / Stadt", value=draft.location_name or "Berlin")
+            location_name = st.text_input("Location / City", value=draft.location_name or "Berlin")
         with w2:
             metrics = list(WeatherMetric)
             default_m = next((m for m in metrics if m.value == draft.weather_metric), WeatherMetric.TEMPERATURE_C)
-            wx_metric = st.selectbox("Messgröße", metrics, index=metrics.index(default_m), format_func=lambda m: WEATHER_METRIC_LABELS[m])
+            wx_metric = st.selectbox("Metric", metrics, index=metrics.index(default_m), format_func=lambda m: WEATHER_METRIC_LABELS[m])
         with w3:
             num_ops = [ComparisonOperator.GTE, ComparisonOperator.GT, ComparisonOperator.LTE, ComparisonOperator.LT]
             op_idx = num_ops.index(operator) if operator in num_ops else 0
-            operator = st.selectbox("Bedingung", num_ops, index=op_idx, format_func=lambda o: OPERATOR_LABELS[o])
+            operator = st.selectbox("Operator", num_ops, index=op_idx, format_func=lambda o: OPERATOR_LABELS[o])
         with w4:
-            target_val = st.number_input("Zielwert", value=float(draft.target_value if draft.target_value is not None else 20.0), step=0.5)
+            target_val = st.number_input("Target", value=float(draft.target_value if draft.target_value is not None else 20.0), step=0.5)
             unit = "°C" if "temp" in wx_metric.value else ("km/h" if wx_metric == WeatherMetric.WIND_SPEED_KMH else "mm")
 
     elif detector == DetectorType.WEB_SEARCH:
         search_query = st.text_input(
-            "Suchanfrage für Google Search / Feed",
+            "Search Query",
             value=draft.search_query,
             placeholder="z. B. 3 Zimmer Mietwohnung Berlin Mahlsdorf bis 1300 Euro",
         )
         target_url = st.text_input(
-            "Optionale Portal- oder RSS-Feed-URL (leer lassen für reine Google-Websuche)",
+            "Target / RSS URL (optional, leave blank for Web Search)",
             value=draft.target_url,
             placeholder="https://...",
         )
@@ -266,28 +267,28 @@ def _render_detector_specific_inputs(
     elif detector == DetectorType.PRICE_THRESHOLD:
         p1, p2, p3 = st.columns([2, 1.5, 1])
         with p1:
-            search_query = st.text_input("Produkt / Aktie / Kennzahl", value=draft.search_query, placeholder="z. B. Goldpreis Euro Feinunze")
+            search_query = st.text_input("Asset / Product / Metric", value=draft.search_query, placeholder="z. B. Goldpreis Euro Feinunze")
         with p2:
             num_ops = [ComparisonOperator.LTE, ComparisonOperator.LT, ComparisonOperator.GTE, ComparisonOperator.GT]
             op_idx = num_ops.index(operator) if operator in num_ops else 0
             operator = st.selectbox("Operator", num_ops, index=op_idx, format_func=lambda o: OPERATOR_LABELS[o])
         with p3:
-            target_val = st.number_input("Schwellenwert", value=float(draft.target_value if draft.target_value is not None else 100.0), step=1.0)
+            target_val = st.number_input("Threshold", value=float(draft.target_value if draft.target_value is not None else 100.0), step=1.0)
         u1, u2, u3 = st.columns([2, 1, 1])
         with u1:
-            target_url = st.text_input("Optionale Produktseiten-URL", value=draft.target_url, placeholder="https://...")
+            target_url = st.text_input("Product URL (optional)", value=draft.target_url, placeholder="https://...")
         with u2:
-            css_sel = st.text_input("Optionaler CSS-Selektor", value=draft.css_selector, placeholder=".price")
+            css_sel = st.text_input("CSS Selector (optional)", value=draft.css_selector, placeholder=".price")
         with u3:
-            unit = st.text_input("Einheit", value=draft.unit or "€")
+            unit = st.text_input("Unit", value=draft.unit or "€")
 
     elif detector == DetectorType.PAGE_CHANGE:
-        target_url = st.text_input("Zu überwachende Webseite (URL)", value=draft.target_url, placeholder="https://...")
-        css_sel = st.text_input("Optionaler CSS-Selektor (nur diesen Seitenbereich prüfen)", value=draft.css_selector)
+        target_url = st.text_input("Target URL", value=draft.target_url, placeholder="https://...")
+        css_sel = st.text_input("CSS Selector (optional)", value=draft.css_selector)
 
     elif detector == DetectorType.HTTP_API:
-        target_url = st.text_input("Endpunkt- / API-URL", value=draft.target_url, placeholder="https://api.example.com/health")
-        json_path = st.text_input("Optionaler JSON-Punktpfad (z. B. data.status)", value=draft.json_path)
+        target_url = st.text_input("API Endpoint URL", value=draft.target_url, placeholder="https://api.example.com/health")
+        json_path = st.text_input("JSON Path (optional, e.g. data.status)", value=draft.json_path)
 
     return location_name, wx_metric, operator, target_val, unit, search_query, target_url, css_sel, json_path
 
@@ -312,20 +313,20 @@ def _handle_save_submission(
         )
         repository.upsert_rule(rule)
         st.session_state.pop("compiled_draft", None)
-        st.success(f"Wächter **{rule.title}** wurde gespeichert!")
+        st.success(f"Alert **{rule.title}** saved!")
 
         if run_immediately:
-            with st.spinner("Führe ersten Live-Check durch..."):
+            with st.spinner("Running initial Live Check..."):
                 outcome, msg = dispatcher.check_rule_now(rule.id, repository=repository)
             if outcome and outcome.outcome == CheckOutcome.TRIGGERED:
                 st.balloons()
                 st.success(
-                    f"Sofort-Treffer! {outcome.finding.summary if outcome.finding else msg}",
+                    f"Instant Match! {outcome.finding.summary if outcome.finding else msg}",
                     icon=":material/notifications_active:",
                 )
             elif outcome and outcome.finding:
-                st.info(f"Erster Check abgeschlossen: {outcome.finding.summary}")
+                st.info(f"Initial Check finished: {outcome.finding.summary}")
             elif outcome and outcome.error_message:
-                st.warning(f"Wächter angelegt, aber erster Check meldete: {outcome.error_message}")
+                st.warning(f"Alert saved, initial Check reported: {outcome.error_message}")
     except AlertBotError as exc:
-        st.error(f"Regel konnte nicht gespeichert werden: {exc}")
+        st.error(f"Failed to save rule: {exc}")
