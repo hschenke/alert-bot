@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.domain.enums import ComparisonOperator, DetectorType, RuleStatus, TriggerMode
-from src.domain.models import AlertEvent, AlertRule, ThresholdSpec
+from src.domain.enums import CheckOutcome, ComparisonOperator, DetectorType, RuleStatus, TriggerMode
+from src.domain.models import AlertEvent, AlertRule, CheckLogEntry, ThresholdSpec
 from src.notifications.email_renderer import render_alert_email_html
 from src.storage.repository import SqlAlertRepository
 from src.storage.sqlite_executor import SqliteExecutor
@@ -66,7 +66,7 @@ class TestAppIconsAndSubtleUi:
         assert format_interval_label(1440) == "1d"
         assert format_interval_label(2880) == "2d"
 
-    def test_streamlit_app_renders_english_nav_no_refresh_and_collapsed_alerts(
+    def test_streamlit_app_renders_alerts_title_compact_kpis_logs_expander_and_safe_delete(
         self,
         monkeypatch,
         tmp_path: Path,
@@ -90,6 +90,16 @@ class TestAppIconsAndSubtleUi:
                     updated_at=f"2026-11-13T10:0{idx}:00+00:00",
                 )
             )
+        repo.append_check_log(
+            CheckLogEntry(
+                id="log_r1",
+                rule_id="rule_1",
+                outcome=CheckOutcome.OK_NO_MATCH,
+                message="Measured 2.45 % (below 2.5 %)",
+                duration_ms=88,
+                created_at="2026-11-13T10:05:00+00:00",
+            )
+        )
         repo.close()
 
         monkeypatch.setenv("SQLITE_PATH", str(db_file))
@@ -109,16 +119,49 @@ class TestAppIconsAndSubtleUi:
         assert any("Settings" in lbl for lbl in sidebar_labels)
         assert not any("Ansicht aktualisieren" in lbl for lbl in sidebar_labels)
 
-        # Alle Alert-Boxen auf der Active-Alerts-Seite müssen standardmäßig eingeklappt sein
-        assert len(at.expander) == 3
-        assert all(exp.proto.expanded is False for exp in at.expander)
-        assert "Sample Alert 1" in at.expander[2].label or "Sample Alert 1" in at.expander[0].label
+        # Seitentitel der Active-Alerts-Seite ist kurz "📡 Alerts"
+        assert [s.value for s in at.subheader] == ["📡 Alerts"]
 
-        # Check-Logs-Toggle muss ohne verschachtelte Expander renderbar sein
-        assert len(at.toggle) == 3
-        at.toggle[0].set_value(True).run()
-        assert not at.exception
+        # Kompakte 4er-KPI-Leiste ohne riesige Einzelmetriken
+        kpi_html = "".join(m.value for m in at.markdown if "ab-kpi-grid" in m.value)
+        assert "ab-kpi-grid" in kpi_html
+        for label in ("Active", "Total", "Triggers", "Events"):
+            assert label in kpi_html
+
+        # 3 Alert-Boxen + 3 innere Check-Logs-Boxen: alle standardmäßig eingeklappt, kein Log-Toggle
+        assert len(at.toggle) == 0
+        assert len(at.expander) == 6
         assert all(exp.proto.expanded is False for exp in at.expander)
+        log_expanders = [exp for exp in at.expander if exp.label == "📋 Check Logs"]
+        assert len(log_expanders) == 3
+        assert any("Measured 2.45 %" in m.value for m in at.markdown)
+
+        # Lösch-Absicherung: erster Klick löscht nicht, sondern fordert Checkbox + Bestätigung an
+        at = at.button(key="del_rule_3").click().run()
+        assert not at.exception
+        assert len(at.expander) == 6
+        assert len(at.warning) >= 1
+        assert at.button(key="confirm_del_rule_3").disabled is True
+
+        # Abbrechen behält die Regel unverändert
+        at = at.button(key="cancel_del_rule_3").click().run()
+        assert not at.exception
+        assert len(at.expander) == 6
+
+        # Erneutes Delete + Bestätigungs-Checkbox -> erst danach wird dauerhaft gelöscht
+        at = at.button(key="del_rule_3").click().run()
+        at = at.checkbox(key="confirm_del_chk_rule_3").check().run()
+        assert at.button(key="confirm_del_rule_3").disabled is False
+        at = at.button(key="confirm_del_rule_3").click().run()
+        assert not at.exception
+        assert len(at.expander) == 4
+
+        verify_repo = SqlAlertRepository(SqliteExecutor(db_file))
+        try:
+            assert verify_repo.get_rule("rule_3") is None
+            assert verify_repo.get_rule("rule_1") is not None
+        finally:
+            verify_repo.close()
 
         # Navigation zu allen anderen Tabs ohne Fehler
         for tab_name in ("New Alert", "Alert History", "Settings", "Active Alerts"):

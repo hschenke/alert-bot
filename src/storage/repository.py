@@ -331,6 +331,27 @@ class SqlAlertRepository:
             )
         return [map_row_to_check_log(row) for row in res.rows]
 
+    def list_recent_check_logs_by_rule(self, per_rule_limit: int = 8) -> dict[str, list[CheckLogEntry]]:
+        """Lädt bis zu `per_rule_limit` aktuelle Prüf-Logs je Regel in einer einzigen Abfrage."""
+        res = self._executor.execute(
+            """
+            SELECT id, rule_id, outcome, message, measured_display, duration_ms, created_at
+            FROM (
+                SELECT id, rule_id, outcome, message, measured_display, duration_ms, created_at,
+                       ROW_NUMBER() OVER (PARTITION BY rule_id ORDER BY created_at DESC) AS rn
+                FROM alert_check_logs
+            )
+            WHERE rn <= ?
+            ORDER BY created_at DESC
+            """,
+            (per_rule_limit,),
+        )
+        grouped: dict[str, list[CheckLogEntry]] = {}
+        for row in res.rows:
+            entry = map_row_to_check_log(row)
+            grouped.setdefault(entry.rule_id, []).append(entry)
+        return grouped
+
     def close(self) -> None:
         self._executor.close()
 

@@ -90,7 +90,31 @@ class TestSqlAlertRepository:
                     created_at="2026-11-07T10:05:00+00:00",
                 )
             )
-            assert len(repo.list_check_logs("r1")) == 1
+            repo.append_check_log(
+                CheckLogEntry(
+                    id="log2",
+                    rule_id="r1",
+                    outcome=CheckOutcome.OK_NO_MATCH,
+                    message="Latest R1",
+                    duration_ms=90,
+                    created_at="2026-11-07T10:10:00+00:00",
+                )
+            )
+            repo.append_check_log(
+                CheckLogEntry(
+                    id="log3",
+                    rule_id="r2",
+                    outcome=CheckOutcome.OK_NO_MATCH,
+                    message="R2 Log",
+                    duration_ms=55,
+                    created_at="2026-11-07T10:12:00+00:00",
+                )
+            )
+            assert len(repo.list_check_logs("r1")) == 2
+            grouped = repo.list_recent_check_logs_by_rule(per_rule_limit=1)
+            assert [e.id for e in grouped["r1"]] == ["log2"]
+            assert [e.id for e in grouped["r2"]] == ["log3"]
+
             assert repo.delete_rule("r1") is True
             assert repo.get_rule("r1") is None
         finally:
