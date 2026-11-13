@@ -9,12 +9,18 @@ from src.config.settings import AppSettings, load_app_settings
 from src.domain.enums import AuthRole
 from src.storage.repository import SqlAlertRepository, create_alert_repository
 from src.ui.auth_view import clear_auth_cookie, enforce_authentication
+from src.ui.icons import APP_ICON_PNG_PATH, inject_app_icons_head, render_brand_header
 from src.ui.styles import inject_global_styles
 from src.ui.views.active_alerts_view import render_active_alerts_view
 from src.ui.views.events_view import render_events_view
 from src.ui.views.new_alert_view import render_new_alert_view
 from src.ui.views.settings_view import render_settings_view
 from src.worker.dispatcher import AlertWorkDispatcher
+
+_PAGE_ACTIVE = "📡 Aktive Wächter"
+_PAGE_NEW = "➕ Neuer Alert"
+_PAGE_EVENTS = ":material/notifications: Treffer-Historie"
+_PAGE_SETTINGS = "⚙️ System & Kanäle"
 
 
 @st.cache_resource
@@ -33,10 +39,11 @@ def run_streamlit_app() -> None:
     """Initialisiert Seite, Authentifizierung, Navigation und die gewählte Teilansicht."""
     st.set_page_config(
         page_title="Alert-Bot | 24/7 Smart Watcher",
-        page_icon="🔔",
+        page_icon=APP_ICON_PNG_PATH,
         layout="wide",
     )
     inject_global_styles()
+    inject_app_icons_head()
 
     settings = load_app_settings()
     role = enforce_authentication(settings)
@@ -44,8 +51,7 @@ def run_streamlit_app() -> None:
     repository = _get_shared_repository(settings)
 
     with st.sidebar:
-        st.title("🔔 Alert-Bot")
-        st.caption(f"v{__version__} • 24/7 Smart Monitoring")
+        render_brand_header("Alert-Bot", subtitle=f"v{__version__} • 24/7 Smart Monitoring")
         if role == AuthRole.READONLY:
             st.info("🔓 Lese-Ansicht (E-Mail-Direktlink)")
             render_events_only = True
@@ -53,16 +59,16 @@ def run_streamlit_app() -> None:
             render_events_only = False
 
         default_view = str(st.query_params.get("view", "")).strip()
-        pages = ["📡 Aktive Wächter", "➕ Neuer Alert", "🔔 Treffer-Historie", "⚙️ System & Kanäle"]
+        pages = [_PAGE_ACTIVE, _PAGE_NEW, _PAGE_EVENTS, _PAGE_SETTINGS]
         if "active_page" not in st.session_state:
             if render_events_only or default_view == "events":
-                st.session_state["active_page"] = "🔔 Treffer-Historie"
+                st.session_state["active_page"] = _PAGE_EVENTS
             elif default_view == "new":
-                st.session_state["active_page"] = "➕ Neuer Alert"
+                st.session_state["active_page"] = _PAGE_NEW
             else:
-                st.session_state["active_page"] = "📡 Aktive Wächter"
+                st.session_state["active_page"] = _PAGE_ACTIVE
         elif render_events_only:
-            st.session_state["active_page"] = "🔔 Treffer-Historie"
+            st.session_state["active_page"] = _PAGE_EVENTS
 
         if not render_events_only:
             st.markdown(
@@ -98,11 +104,11 @@ def run_streamlit_app() -> None:
                 st.query_params.clear()
             st.rerun()
 
-    if selected_page == "📡 Aktive Wächter":
+    if selected_page == _PAGE_ACTIVE:
         render_active_alerts_view(repository, dispatcher, role)
-    elif selected_page == "➕ Neuer Alert":
+    elif selected_page == _PAGE_NEW:
         render_new_alert_view(settings, repository, dispatcher)
-    elif selected_page == "🔔 Treffer-Historie":
+    elif selected_page == _PAGE_EVENTS:
         render_events_view(repository)
     else:
         render_settings_view(settings, repository, dispatcher)

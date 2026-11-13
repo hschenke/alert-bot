@@ -53,7 +53,7 @@ STATUS_BADGES: dict[RuleStatus, str] = {
 }
 
 OUTCOME_BADGES: dict[CheckOutcome, str] = {
-    CheckOutcome.TRIGGERED: "🔔 Alarm ausgelöst",
+    CheckOutcome.TRIGGERED: ":material/notifications_active: Alarm ausgelöst",
     CheckOutcome.SUPPRESSED: "🛡️ Aktiv (kein erneuter Spam)",
     CheckOutcome.OK_NO_MATCH: "✅ Geprüft (noch nicht eingetreten)",
     CheckOutcome.ERROR: "⚠️ Prüffehler",

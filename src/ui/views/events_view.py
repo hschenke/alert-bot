@@ -12,7 +12,7 @@ from src.ui.formatters import DETECTOR_LABELS, format_iso_timestamp
 
 def render_events_view(repository: SqlAlertRepository) -> None:
     """Zeigt alle ausgelösten Alarme und deren gefundene Einzel-Angebote an."""
-    st.subheader("🔔 Ausgelöste Alarme & Treffer-Historie")
+    st.subheader(":material/notifications: Ausgelöste Alarme & Treffer-Historie")
 
     focused_id = str(st.query_params.get("event_id", "")).strip()
     if focused_id:
@@ -43,7 +43,7 @@ def _render_event_card(event: AlertEvent, expanded: bool) -> None:
     with st.container(border=True):
         c1, c2 = st.columns([3.5, 1.5])
         with c1:
-            st.markdown(f"### 🔔 {event.headline}")
+            st.markdown(f"### :material/notifications_active: {event.headline}")
             st.caption(
                 f"{format_iso_timestamp(event.created_at)}  •  "
                 f"{DETECTOR_LABELS[event.detector_type]}"
@@ -74,7 +74,7 @@ def _render_event_card(event: AlertEvent, expanded: bool) -> None:
 
 
 def _build_markdown_export(events: list[AlertEvent]) -> str:
-    lines = ["# 🔔 Alert-Bot Treffer-Historie", ""]
+    lines = ["# Alert-Bot Treffer-Historie", ""]
     for ev in events:
         lines.append(f"## {ev.headline} ({format_iso_timestamp(ev.created_at)})")
         lines.append(ev.summary)

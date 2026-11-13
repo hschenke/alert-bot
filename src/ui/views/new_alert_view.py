@@ -319,7 +319,10 @@ def _handle_save_submission(
                 outcome, msg = dispatcher.check_rule_now(rule.id, repository=repository)
             if outcome and outcome.outcome == CheckOutcome.TRIGGERED:
                 st.balloons()
-                st.success(f"🔔 Sofort-Treffer! {outcome.finding.summary if outcome.finding else msg}")
+                st.success(
+                    f"Sofort-Treffer! {outcome.finding.summary if outcome.finding else msg}",
+                    icon=":material/notifications_active:",
+                )
             elif outcome and outcome.finding:
                 st.info(f"Erster Check abgeschlossen: {outcome.finding.summary}")
             elif outcome and outcome.error_message:

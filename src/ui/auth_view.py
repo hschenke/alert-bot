@@ -23,6 +23,7 @@ from src.security.auth import (
     resolve_credential_role,
     verify_admin_token,
 )
+from src.ui.icons import render_brand_header
 
 logger = logging.getLogger(__name__)
 
@@ -189,8 +190,12 @@ def enforce_authentication(settings: AppSettings) -> AuthRole:
 
 def _render_login_form(settings: AppSettings, controller: Any | None = None) -> None:
     limiter = _get_rate_limiter()
-    st.title("🔐 Alert-Bot Anmeldung")
-    st.caption("Geschützter Zugriff – bitte Passwort eingeben.")
+    render_brand_header(
+        "Alert-Bot Anmeldung",
+        subtitle="Geschützter Zugriff – bitte Passwort eingeben.",
+        icon_size_px=38,
+        title_size_rem=1.85,
+    )
 
     locked, wait_sec = limiter.is_locked_out("web")
     if locked:

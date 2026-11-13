@@ -54,7 +54,7 @@ class EmailNotificationChannel:
             app_password=self._settings.app_password,
         )
         html_body = render_alert_email_html(event=event, app_event_url=app_url)
-        subject = f"🔔 Alert: {event.headline[:95]}"
+        subject = f"Alert: {event.headline[:95]}"
         return self._send_via_resend(recipient, subject, html_body)
 
     def send_test_email(self, override_recipient: str = "") -> tuple[bool, str]:

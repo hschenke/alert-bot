@@ -109,7 +109,7 @@ def _render_single_rule_card(
         meta1.caption(f"🕓 Geprüft: **{format_iso_timestamp(rule.last_checked_at)}**")
         meta2.caption(f"⏭️ Nächster Check: **{format_iso_timestamp(rule.next_check_at)}**")
         meta3.caption(
-            f"🔔 Alarme ausgelöst: **{rule.total_triggers}**",
+            f":material/notifications: Alarme ausgelöst: **{rule.total_triggers}**",
             help="Zählt ausgelöste Alarm-Mitteilungen. Die erste Basismessung dient als Referenz und löst noch keinen Alarm aus.",
         )
 
@@ -141,7 +141,7 @@ def _render_admin_controls(
             with st.spinner(f"Prüfe »{rule.title}«..."):
                 outcome, msg = dispatcher.check_rule_now(rule.id, repository=repository)
             if outcome and outcome.outcome == CheckOutcome.TRIGGERED:
-                st.toast(f"🔔 Alarm ausgelöst: {rule.title}")
+                st.toast(f"Alarm ausgelöst: {rule.title}", icon=":material/notifications_active:")
             else:
                 st.toast(msg)
             st.rerun()

@@ -1,4 +1,4 @@
-# 🔔 Alert-Bot
+# Alert-Bot
 
 Ein autonomer, KI-gestützter **24/7 Smart-Alert-Bot**, dem du in normaler Sprache sagen kannst, was er für dich im Blick behalten soll – und der dich sofort **per E-Mail benachrichtigt**, sobald deine Bedingung eintritt oder ein neues passendes Angebot online geht.
 

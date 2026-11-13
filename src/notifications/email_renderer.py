@@ -105,8 +105,8 @@ def render_alert_email_html(event: AlertEvent, app_event_url: str = "") -> str:
 <body style="margin:0;padding:20px;background:#F1F5F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:620px;margin:0 auto;background:#F8FAFC;border:1px solid #CBD5E1;border-radius:14px;overflow:hidden;">
     <div style="background:#0F172A;color:#F8FAFC;padding:18px 22px;">
-      <div style="font-size:12px;color:#FB923C;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">
-        🔔 Alert-Bot Treffer-Meldung
+      <div style="font-size:12px;color:#93C5FD;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3B82F6;margin-right:6px;vertical-align:middle;"></span>Alert-Bot Treffer-Meldung
       </div>
       <h1 style="margin:6px 0 0 0;font-size:20px;line-height:1.3;">{headline}</h1>
     </div>
