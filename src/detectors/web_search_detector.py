@@ -181,7 +181,10 @@ class WebSearchDetector:
             if keywords and not any(kw in text for kw in keywords):
                 continue
             if target_val is not None:
-                val = parse_localized_float(f"{item.title} {item.summary} {item.price_or_value}")
+                val = parse_localized_float(
+                    f"{item.title} {item.summary} {item.price_or_value}",
+                    rule.threshold.unit,
+                )
                 if val is not None and not evaluate_numeric_operator(val, op, target_val):
                     continue
             matched.append(item)

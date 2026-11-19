@@ -8,7 +8,12 @@ from src.__version__ import __version__
 from src.config.settings import AppSettings, load_app_settings
 from src.domain.enums import AuthRole
 from src.storage.repository import SqlAlertRepository, create_alert_repository
-from src.ui.auth_view import clear_auth_cookie, enforce_authentication
+from src.ui.auth_view import (
+    clear_auth_cookie,
+    enforce_authentication,
+    go_to_start_page,
+    switch_to_admin_login,
+)
 from src.ui.formatters import (
     PAGE_ACTIVE_ALERTS,
     PAGE_ALERT_HISTORY,
@@ -55,6 +60,12 @@ def run_streamlit_app() -> None:
         render_brand_header("Alert-Bot", subtitle=f"v{__version__} • 24/7 Smart Monitoring")
         if role == AuthRole.READONLY:
             st.info("🔓 Read-Only View (Email Link)")
+            if st.button("🔐 Admin Login", key="ro_sidebar_admin_login_btn", type="primary", use_container_width=True):
+                switch_to_admin_login()
+                st.rerun()
+            if st.button("🏠 Go to Start Page", key="ro_sidebar_home_btn", use_container_width=True):
+                go_to_start_page()
+                st.rerun()
             render_events_only = True
         else:
             render_events_only = False
@@ -108,6 +119,6 @@ def run_streamlit_app() -> None:
     elif selected_page == PAGE_NEW_ALERT:
         render_new_alert_view(settings, repository, dispatcher)
     elif selected_page == PAGE_ALERT_HISTORY:
-        render_events_view(repository)
+        render_events_view(repository, role=role)
     else:
         render_settings_view(settings, repository, dispatcher)

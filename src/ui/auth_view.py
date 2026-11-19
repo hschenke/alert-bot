@@ -120,6 +120,28 @@ def clear_auth_cookie() -> None:
             logger.debug("Fehler beim Löschen des Auth-Cookies: %s", exc)
 
 
+def switch_to_admin_login() -> None:
+    """Wechselt aus der Read-Only-Ansicht zum Admin-Login (behält Event-Kontext bei)."""
+    current = str(st.session_state.get("auth_token", ""))
+    if current.startswith("ro:"):
+        st.session_state["readonly_return_token"] = current
+        st.session_state.pop("auth_token", None)
+    if "token" in st.query_params:
+        del st.query_params["token"]
+    st.session_state["force_admin_login"] = True
+
+
+def go_to_start_page() -> None:
+    """Kehrt zur Startseite (Active Alerts bzw. Login) zurück und bereinigt Deep-Link-Parameter."""
+    current = str(st.session_state.get("auth_token", ""))
+    if current.startswith("ro:"):
+        st.session_state.pop("auth_token", None)
+    st.session_state.pop("force_admin_login", None)
+    st.session_state.pop("readonly_return_token", None)
+    st.session_state.pop("active_page", None)
+    st.query_params.clear()
+
+
 def enforce_authentication(settings: AppSettings) -> AuthRole:
     """Prüft Session-State, 30-Tage-Browser-Persistenz oder URL-Token und rendert Login bei Bedarf."""
     if not settings.app_password.strip():
@@ -133,7 +155,9 @@ def enforce_authentication(settings: AppSettings) -> AuthRole:
         st.stop()
         return AuthRole.GUEST
 
-    # 1. Aktive Session im Speicher
+    force_admin = bool(st.session_state.get("force_admin_login", False))
+
+    # 1. Aktive Admin-Session im Speicher
     session_token = str(st.session_state.get("auth_token", ""))
     role = resolve_credential_role(
         session_token,
@@ -141,14 +165,32 @@ def enforce_authentication(settings: AppSettings) -> AuthRole:
         max_age_seconds=AUTH_COOKIE_MAX_AGE_SECONDS,
     )
     if role == AuthRole.ADMIN:
+        st.session_state.pop("force_admin_login", None)
+        st.session_state.pop("readonly_return_token", None)
         if st.session_state.get("remember_me") and not st.session_state.get("storage_synced"):
             _render_save_storage_script(session_token)
             st.session_state["storage_synced"] = True
         return AuthRole.ADMIN
 
-    # 2. URL-Token (z. B. aus E-Mail-Direktlinks oder Mobile-Bookmark/Home-Screen)
+    # 2. Persistentes 30-Tage-Admin-Cookie im Browser (verhindert unnötigen Read-Only-Downgrade)
+    controller = CookieController() if CookieController is not None else None
+    cookie_token = _get_cookie_val(controller)
+    if cookie_token and verify_admin_token(
+        cookie_token,
+        settings.app_password,
+        max_age_seconds=AUTH_COOKIE_MAX_AGE_SECONDS,
+    ):
+        st.session_state["auth_token"] = cookie_token
+        st.session_state.pop("force_admin_login", None)
+        st.session_state.pop("readonly_return_token", None)
+        st.query_params["token"] = cookie_token
+        _render_save_storage_script(cookie_token)
+        st.session_state["storage_synced"] = True
+        return AuthRole.ADMIN
+
+    # 3. URL-Token (z. B. aus E-Mail-Direktlinks oder Mobile-Bookmark/Home-Screen)
     url_token = str(st.query_params.get("token", "")).strip()
-    if url_token:
+    if url_token and not force_admin:
         token_role = resolve_credential_role(
             url_token,
             settings.app_password,
@@ -163,21 +205,7 @@ def enforce_authentication(settings: AppSettings) -> AuthRole:
         st.query_params.clear()
         _render_clear_storage_script()
 
-    # 3. Persistentes 30-Tage-Cookie im Browser
-    controller = CookieController() if CookieController is not None else None
-    cookie_token = _get_cookie_val(controller)
-    if cookie_token and verify_admin_token(
-        cookie_token,
-        settings.app_password,
-        max_age_seconds=AUTH_COOKIE_MAX_AGE_SECONDS,
-    ):
-        st.session_state["auth_token"] = cookie_token
-        st.query_params["token"] = cookie_token
-        _render_save_storage_script(cookie_token)
-        st.session_state["storage_synced"] = True
-        return AuthRole.ADMIN
-
-    if role == AuthRole.READONLY:
+    if role == AuthRole.READONLY and not force_admin:
         return AuthRole.READONLY
 
     # 4. Automatisches Wiederherstellen aus localStorage/Cookie anstoßen
@@ -213,6 +241,8 @@ def _render_login_form(settings: AppSettings, controller: Any | None = None) -> 
             limiter.reset("web")
             token = generate_admin_token(settings.app_password)
             st.session_state["auth_token"] = token
+            st.session_state.pop("force_admin_login", None)
+            st.session_state.pop("readonly_return_token", None)
             if remember_me:
                 st.query_params["token"] = token
                 st.session_state["remember_me"] = True
@@ -220,8 +250,22 @@ def _render_login_form(settings: AppSettings, controller: Any | None = None) -> 
             else:
                 st.session_state["remember_me"] = False
                 if "token" in st.query_params:
-                    st.query_params.clear()
+                    del st.query_params["token"]
                 _render_clear_storage_script()
             st.rerun()
         limiter.record_failure("web")
         st.error("Invalid password.")
+
+    return_token = str(st.session_state.get("readonly_return_token", "")).strip()
+    if return_token or st.query_params.get("view") or st.query_params.get("event_id"):
+        c_back, c_home = st.columns(2)
+        with c_back:
+            if return_token and st.button("↩️ Back to Read-Only View", key="login_back_ro_btn", use_container_width=True):
+                st.session_state.pop("force_admin_login", None)
+                st.session_state["auth_token"] = return_token
+                st.query_params["token"] = return_token
+                st.rerun()
+        with c_home:
+            if st.button("🏠 Go to Start Page", key="login_start_page_btn", use_container_width=True):
+                go_to_start_page()
+                st.rerun()

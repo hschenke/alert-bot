@@ -155,7 +155,7 @@ class WeatherThresholdDetector:
                 logger.warning("KI-Wetterextraktion fehlgeschlagen (%s), nutze Heuristik: %s", type(exc).__name__, exc)
 
         if snippets:
-            parsed = parse_localized_float(snippets)
+            parsed = parse_localized_float(snippets, unit, strict_unit=True)
             if parsed is not None:
                 return parsed, location, primary_url
 

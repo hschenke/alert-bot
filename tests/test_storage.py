@@ -80,6 +80,13 @@ class TestSqlAlertRepository:
             assert len(loaded_events) == 1
             assert len(loaded_events[0].items) == 2
 
+            assert repo.delete_event("ev1") is True
+            assert repo.get_event("ev1") is None
+            assert repo.delete_event("ev1") is False
+
+            assert repo.clear_seen_items("r1") == 2
+            assert repo.get_seen_fingerprints("r1") == set()
+
             repo.append_check_log(
                 CheckLogEntry(
                     id="log1",

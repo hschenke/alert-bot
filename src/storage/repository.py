@@ -237,6 +237,11 @@ class SqlAlertRepository:
         ]
         self._executor.execute_batch(stmts)
 
+    def clear_seen_items(self, rule_id: str) -> int:
+        """Entfernt gemerkte Treffer-Fingerprints einer Regel (Baseline-Reset)."""
+        res = self._executor.execute("DELETE FROM alert_seen_items WHERE rule_id = ?", (rule_id,))
+        return res.affected_rows
+
     def save_event(self, event: AlertEvent) -> None:
         """Persistiert ein ausgelöstes Alarm-Ereignis."""
         self._executor.execute(
@@ -262,6 +267,11 @@ class SqlAlertRepository:
                 event.created_at,
             ),
         )
+
+    def delete_event(self, event_id: str) -> bool:
+        """Löscht ein einzelnes Alarm-Ereignis anhand seiner ID."""
+        res = self._executor.execute("DELETE FROM alert_events WHERE id = ?", (event_id,))
+        return res.affected_rows > 0
 
     def list_events(self, rule_id: str | None = None, limit: int = 50) -> list[AlertEvent]:
         """Lädt die neuesten Alarm-Ereignisse chronologisch absteigend."""

@@ -24,6 +24,7 @@ from src.ui.formatters import (
     format_interval_label,
     format_iso_timestamp,
 )
+from src.ui.views.rule_editor_form import render_rule_editor_panel
 from src.worker.dispatcher import AlertWorkDispatcher
 
 _EXPANDER_SUPPORTS_KEY = "key" in inspect.signature(st.expander).parameters
@@ -96,11 +97,16 @@ def _render_single_rule_card(
     role: AuthRole,
 ) -> None:
     is_confirming_delete = st.session_state.get("confirm_delete_rule_id") == rule.id
-    with _open_expander(_build_expander_label(rule), f"alert_box_{rule.id}", is_confirming_delete):
+    is_editing = st.session_state.get("edit_rule_id") == rule.id
+    with _open_expander(
+        _build_expander_label(rule),
+        f"alert_box_{rule.id}",
+        is_confirming_delete or is_editing,
+    ):
         _render_rule_header(rule)
         _render_rule_details(rule)
         if role == AuthRole.ADMIN:
-            _render_admin_controls(rule, repository, dispatcher, is_confirming_delete)
+            _render_admin_controls(rule, repository, dispatcher, is_confirming_delete, is_editing)
         _render_check_logs(rule.id, logs)
 
 
@@ -147,8 +153,9 @@ def _render_admin_controls(
     repository: SqlAlertRepository,
     dispatcher: AlertWorkDispatcher,
     is_confirming_delete: bool,
+    is_editing: bool,
 ) -> None:
-    b1, b2, b3, b4 = st.columns([1.4, 1.4, 1.5, 1])
+    b1, b2, b3, b4, b5 = st.columns([1.2, 1.1, 1.0, 1.2, 0.9])
     with b1:
         if st.button("▶️ Check Now", key=f"chk_{rule.id}", use_container_width=True):
             _trigger_manual_check(rule, repository, dispatcher)
@@ -160,13 +167,21 @@ def _render_admin_controls(
             repository.set_rule_status(rule.id, next_status, utc_now_iso())
             st.rerun()
     with b3:
-        _render_interval_selector(rule, repository)
+        if st.button("✏️ Edit", key=f"edit_{rule.id}", disabled=is_editing, use_container_width=True):
+            st.session_state["edit_rule_id"] = rule.id
+            st.session_state.pop("confirm_delete_rule_id", None)
+            st.rerun()
     with b4:
+        _render_interval_selector(rule, repository)
+    with b5:
         if st.button("🗑️ Delete", key=f"del_{rule.id}", disabled=is_confirming_delete, use_container_width=True):
             st.session_state["confirm_delete_rule_id"] = rule.id
+            st.session_state.pop("edit_rule_id", None)
             st.session_state.pop(f"confirm_del_chk_{rule.id}", None)
             st.rerun()
 
+    if is_editing:
+        render_rule_editor_panel(rule, repository, dispatcher)
     if is_confirming_delete:
         _render_delete_confirmation(rule, repository)
 
