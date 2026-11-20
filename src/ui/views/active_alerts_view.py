@@ -41,13 +41,7 @@ def render_active_alerts_view(
     role: AuthRole,
 ) -> None:
     """Zeigt kompakte KPI-Kacheln und eingeklappte Alert-Boxen für alle Regeln."""
-    top_col, action_col = st.columns([3.5, 1.2], vertical_alignment="center")
-    with top_col:
-        st.subheader("📡 Alerts")
-    with action_col:
-        if st.button(PAGE_NEW_ALERT, key="top_add_alert_btn", use_container_width=True):
-            st.session_state["active_page"] = PAGE_NEW_ALERT
-            st.rerun()
+    st.subheader("📡 Alerts")
 
     rules = repository.list_rules()
     events = repository.list_events(limit=20)
@@ -58,6 +52,10 @@ def render_active_alerts_view(
         recent_events_count=len(events),
     )
     st.markdown(kpi_html, unsafe_allow_html=True)
+
+    if st.button(PAGE_NEW_ALERT, key="top_add_alert_btn", use_container_width=True):
+        st.session_state["active_page"] = PAGE_NEW_ALERT
+        st.rerun()
 
     st.divider()
     if not rules:

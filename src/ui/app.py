@@ -100,19 +100,15 @@ def run_streamlit_app() -> None:
 
         selected_page = st.session_state["active_page"]
 
-        st.divider()
-        st.caption(f"Storage: **{repository.backend_name}**")
-        if (
-            settings.app_password.strip()
-            and role == AuthRole.ADMIN
-            and st.button("🚪 Logout", use_container_width=True)
-        ):
-            clear_auth_cookie()
-            st.session_state.pop("auth_token", None)
-            st.session_state["just_logged_out"] = True
-            if "token" in st.query_params:
-                st.query_params.clear()
-            st.rerun()
+        if settings.app_password.strip() and role == AuthRole.ADMIN:
+            st.divider()
+            if st.button("🚪 Logout", use_container_width=True):
+                clear_auth_cookie()
+                st.session_state.pop("auth_token", None)
+                st.session_state["just_logged_out"] = True
+                if "token" in st.query_params:
+                    st.query_params.clear()
+                st.rerun()
 
     if selected_page == PAGE_ACTIVE_ALERTS:
         render_active_alerts_view(repository, dispatcher, role)

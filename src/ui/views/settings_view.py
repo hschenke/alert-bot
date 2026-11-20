@@ -26,7 +26,7 @@ def render_settings_view(
 
     st.divider()
     st.markdown("### 📧 Test Email")
-    col_mail, col_btn = st.columns([3, 1.2])
+    col_mail, col_btn = st.columns([3, 1.2], vertical_alignment="bottom")
     with col_mail:
         test_recipient = st.text_input(
             "Recipient Email",
@@ -34,13 +34,14 @@ def render_settings_view(
             placeholder="you@example.com",
         )
     with col_btn:
-        st.write("")
-        if st.button("📨 Send Test Email", use_container_width=True):
-            ok, info = EmailNotificationChannel(settings).send_test_email(test_recipient)
-            if ok:
-                st.success(info)
-            else:
-                st.error(info)
+        send_clicked = st.button("📨 Send Test Email", use_container_width=True)
+
+    if send_clicked:
+        ok, info = EmailNotificationChannel(settings).send_test_email(test_recipient)
+        if ok:
+            st.success(info)
+        else:
+            st.error(info)
 
     st.divider()
     st.markdown("### ⏱️ Cron & High-Frequency Polling (1–5m via GitHub Actions, 0 €)")

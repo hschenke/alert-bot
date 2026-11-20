@@ -118,15 +118,20 @@ class TestAppIconsAndSubtleUi:
         assert any("Alert History" in lbl for lbl in sidebar_labels)
         assert any("Settings" in lbl for lbl in sidebar_labels)
         assert not any("Ansicht aktualisieren" in lbl for lbl in sidebar_labels)
+        assert not any("Storage:" in c.value for c in at.sidebar.caption)
 
         # Seitentitel der Active-Alerts-Seite ist kurz "📡 Alerts"
         assert [s.value for s in at.subheader] == ["📡 Alerts"]
 
-        # Kompakte 4er-KPI-Leiste ohne riesige Einzelmetriken
+        # Kompakte 4er-KPI-Leiste ohne riesige Einzelmetriken; New-Alert-Button direkt darunter
         kpi_html = "".join(m.value for m in at.markdown if "ab-kpi-grid" in m.value)
         assert "ab-kpi-grid" in kpi_html
         for label in ("Active", "Total", "Triggers", "Events"):
             assert label in kpi_html
+        main_elements = list(at.main)
+        kpi_idx = next(i for i, el in enumerate(main_elements) if getattr(el, "value", "") and "ab-kpi-grid" in str(el.value))
+        new_btn_idx = next(i for i, el in enumerate(main_elements) if getattr(el, "key", None) == "top_add_alert_btn")
+        assert new_btn_idx > kpi_idx
 
         # 3 Alert-Boxen + 3 innere Check-Logs-Boxen: alle standardmäßig eingeklappt, kein Log-Toggle
         assert len(at.toggle) == 0
@@ -163,12 +168,23 @@ class TestAppIconsAndSubtleUi:
         finally:
             verify_repo.close()
 
-        # Navigation zu allen anderen Tabs ohne Fehler
-        for tab_name in ("New Alert", "Alert History", "Settings", "Active Alerts"):
+        # Klick auf New-Alert-Button unter den KPI-Boxen öffnet New Alert View
+        at = at.button(key="top_add_alert_btn").click().run()
+        assert not at.exception
+        assert [s.value for s in at.subheader] == ["➕ New Alert"]
+
+        # Navigation zu allen anderen Tabs ohne Fehler & Test-Email-Ausrichtung in Settings
+        for tab_name in ("Alert History", "Settings", "Active Alerts"):
             btns = [b for b in at.sidebar.button if tab_name in b.label]
             assert len(btns) == 1
             at = btns[0].click().run()
             assert not at.exception
+            if tab_name == "Settings":
+                assert not any("Storage:" in c.value for c in at.sidebar.caption)
+                send_btns = [b for b in at.button if "Send Test Email" in b.label]
+                assert len(send_btns) == 1
+                at = send_btns[0].click().run()
+                assert not at.exception
 
         monkeypatch.setenv("APP_PASSWORD", "test-pass-123")
         at_login = AppTest.from_file(entrypoint).run()

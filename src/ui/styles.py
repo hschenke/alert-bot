@@ -67,8 +67,13 @@ section[data-testid="stSidebar"] div.stButton > button[kind="secondary"]:hover {
     border-color: rgba(148, 163, 184, 0.3) !important;
     color: #ffffff !important;
 }
-/* Dezenter Aktions-Button im Header & in Karten (nur Secondary, Primary bleibt Warnsignal) */
-div[data-testid="stColumn"] div.stButton > button[kind="secondary"] {
+/* Dezenter Aktions-Button im Header, unter KPIs & in Karten (nur Secondary, Primary bleibt Warnsignal) */
+div.st-key-top_add_alert_btn {
+    max-width: 420px !important;
+    width: 100% !important;
+}
+div[data-testid="stColumn"] div.stButton > button[kind="secondary"],
+div.st-key-top_add_alert_btn div.stButton > button[kind="secondary"] {
     background: rgba(30, 41, 59, 0.6) !important;
     border: 1px solid rgba(148, 163, 184, 0.25) !important;
     color: #e2e8f0 !important;
@@ -76,7 +81,8 @@ div[data-testid="stColumn"] div.stButton > button[kind="secondary"] {
     border-radius: 8px !important;
     transition: all 0.15s ease-in-out !important;
 }
-div[data-testid="stColumn"] div.stButton > button[kind="secondary"]:hover {
+div[data-testid="stColumn"] div.stButton > button[kind="secondary"]:hover,
+div.st-key-top_add_alert_btn div.stButton > button[kind="secondary"]:hover {
     background: rgba(51, 65, 85, 0.8) !important;
     border-color: rgba(148, 163, 184, 0.45) !important;
     color: #ffffff !important;
