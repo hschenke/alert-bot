@@ -61,7 +61,7 @@ STATUS_BADGES: dict[RuleStatus, str] = {
 
 OUTCOME_BADGES: dict[CheckOutcome, str] = {
     CheckOutcome.TRIGGERED: ":material/notifications_active: Triggered",
-    CheckOutcome.SUPPRESSED: "🛡️ Suppressed (Active / Cooldown)",
+    CheckOutcome.SUPPRESSED: ":material/notifications_off: Already Notified",
     CheckOutcome.OK_NO_MATCH: "✅ OK (No Match)",
     CheckOutcome.ERROR: "⚠️ Check Error",
 }

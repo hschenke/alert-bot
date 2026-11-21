@@ -248,7 +248,8 @@ def _render_check_logs(rule_id: str, logs: list[CheckLogEntry]) -> None:
             st.caption("No check logs yet.")
             return
         for log in logs:
+            val_part = f" · `{log.measured_display}`" if log.measured_display else ""
             st.markdown(
                 f"- `{format_iso_timestamp(log.created_at)}` — "
-                f"**{OUTCOME_BADGES[log.outcome]}** ({log.duration_ms} ms): {log.message}"
+                f"**{OUTCOME_BADGES[log.outcome]}**{val_part} ({log.duration_ms} ms): {log.message}"
             )

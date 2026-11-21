@@ -23,7 +23,9 @@ prompts:
     - `web_search`: Wenn nach NEUEN Einträgen, Inseraten (z. B. Mietwohnungen, Immobilien,
       Jobs, Kleinanzeigen), Nachrichten, Terminen oder Ereignissen im Web gesucht werden soll.
     - `price_threshold`: Wenn ein Produktpreis, Aktien-/ETF-/Krypto-Kurs oder eine sonstige
-      numerische Kennzahl aus dem Web gegen einen Schwellenwert geprüft werden soll.
+      numerische Kennzahl aus dem Web gegen einen Schwellenwert oder auf reine Wertänderung
+      geprüft werden soll. Wenn der Nutzer nur über eine Änderung informiert werden möchte
+      (z. B. "wenn sich der Beitragssatz ändert") ohne konkreten Zielwert, setze `target_value` zwingend auf `null`.
     - `page_change`: Wenn eine konkrete Webseite (URL) auf inhaltliche Änderungen, freie
       Termine oder Produktverfügbarkeit überwacht werden soll.
     - `http_api`: Wenn Erreichbarkeit (Uptime/HTTP-Status) oder ein JSON-API-Feld überwacht wird.

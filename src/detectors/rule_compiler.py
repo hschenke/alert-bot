@@ -38,6 +38,26 @@ _CITY_PREPOSITION_RE = re.compile(
     r"\b(?:in|für|fuer|bei|ort)\s+([A-ZÄÖÜa-zäöüß][A-ZÄÖÜa-zäöüß\-\s]{1,35}?)(?=\s+(?:via|über|ueber|unter|ab|bei|sobald|wenn|erreicht|steigt|fällt|faellt|oder|und|,|\.)|$)",
     re.IGNORECASE,
 )
+_VALUE_CHANGE_HINT_RE = re.compile(
+    r"\b(?:ändert|aendert|verändert|veraendert|änderung|aenderung|wechselt|changes|changed|change)\b",
+    re.IGNORECASE,
+)
+_DIRECTIONAL_THRESHOLD_RE = re.compile(
+    r"(?:>=|<=|>|<|==|!=|\b(?:über|ueber|unter|mindestens|maximal|höchstens|hoechstens|"
+    r"steigt|fällt|faellt|sinkt|erreicht|überschreitet|ueberschreitet|unterschreitet|"
+    r"above|below|at\s+least|at\s+most|less\s+than|greater\s+than|under|over|drops|rises|exceeds)\b)",
+    re.IGNORECASE,
+)
+
+
+def is_pure_value_change_intent(*texts: str) -> bool:
+    """True, wenn die Beschreibung eine reine Wertänderung ohne Schwellenwert/Richtung beschreibt."""
+    combined = " ".join(t.strip() for t in texts if t and t.strip())
+    if not combined:
+        return False
+    return bool(_VALUE_CHANGE_HINT_RE.search(combined)) and not bool(
+        _DIRECTIONAL_THRESHOLD_RE.search(combined)
+    )
 
 
 def utc_now_iso() -> str:
@@ -69,15 +89,22 @@ class AlertRuleCompiler:
         user_prompt: str,
         notify_email: str = "",
     ) -> CompiledAlertDraft:
-        """Erzeugt einen strukturierten Regel-Entwurf per Gemini oder lokaler Heuristik."""
+        """Erzeugt einen strukturierten Regel-Entwurf per KI oder lokaler Heuristik."""
         clean_prompt = validate_user_prompt(user_prompt)
         if self._llm is not None:
             try:
-                return self._llm.generate_structured(
+                draft = self._llm.generate_structured(
                     prompt=f"Benutzerwunsch:\n{clean_prompt}",
                     system_instruction=self._compiler_prompt or "Übersetze den Wunsch in eine präzise Alert-Regel.",
                     schema_cls=CompiledAlertDraft,
                 )
+                if (
+                    draft.detector_type == DetectorType.PRICE_THRESHOLD.value
+                    and draft.target_value is not None
+                    and is_pure_value_change_intent(clean_prompt, draft.condition_description)
+                ):
+                    return draft.model_copy(update={"target_value": None})
+                return draft
             except Exception as exc:
                 logger.warning("KI-Regel-Compiler fehlgeschlagen (%s), nutze Heuristik-Fallback: %s", type(exc).__name__, exc)
         return self._heuristic_draft(clean_prompt)

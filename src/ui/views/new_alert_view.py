@@ -84,6 +84,7 @@ def render_new_alert_view(
     with col_reset:
         if st.button("🔄 Reset", use_container_width=True):
             st.session_state.pop("compiled_draft", None)
+            st.session_state.pop("new_alert_use_price_threshold", None)
             st.rerun()
 
     st.divider()
@@ -106,6 +107,7 @@ def _compile_into_session(settings: AppSettings, raw_prompt: str) -> None:
             compiler = _build_compiler(settings)
             draft = compiler.compile_from_prompt(raw_prompt, settings.email_to)
             st.session_state["compiled_draft"] = draft
+            st.session_state["new_alert_use_price_threshold"] = draft.target_value is not None
             st.success(f"Draft erstellt: **{draft.title}** – Details unten prüfen & bei Bedarf anpassen.")
     except AlertBotError as exc:
         st.error(str(exc))
@@ -136,6 +138,14 @@ def _render_rule_editor_form(
         format_func=lambda d: DETECTOR_LABELS[d],
     )
 
+    use_price_threshold = draft.target_value is not None
+    if selected_det == DetectorType.PRICE_THRESHOLD:
+        use_price_threshold = st.checkbox(
+            "Use numeric threshold (unchecked = alert on any value change)",
+            value=draft.target_value is not None,
+            key="new_alert_use_price_threshold",
+        )
+
     with st.form("save_alert_rule_form"):
         c1, c2 = st.columns([2, 1])
         with c1:
@@ -151,7 +161,7 @@ def _render_rule_editor_form(
             )
 
         location_name, wx_metric, operator, target_val, unit, search_query, target_url, css_sel, json_path = (
-            _render_detector_specific_inputs(selected_det, draft)
+            _render_detector_specific_inputs(selected_det, draft, use_price_threshold=use_price_threshold)
         )
 
         condition_desc = st.text_input(
@@ -180,7 +190,7 @@ def _render_rule_editor_form(
                 placeholder="name@example.com",
             )
 
-        notify_first = True
+        notify_first = not (selected_det == DetectorType.PRICE_THRESHOLD and target_val is None)
         if trigger_mode == TriggerMode.EVERY_NEW_ITEM:
             notify_first = st.checkbox(
                 "Vorhandene Treffer beim ersten Check direkt senden (sonst erst ab neuen Items)",
@@ -225,6 +235,8 @@ def _render_rule_editor_form(
 def _render_detector_specific_inputs(
     detector: DetectorType,
     draft: CompiledAlertDraft,
+    *,
+    use_price_threshold: bool = True,
 ) -> tuple[str, WeatherMetric, ComparisonOperator, float | None, str, str, str, str, str]:
     location_name = draft.location_name
     wx_metric = WeatherMetric.TEMPERATURE_C
@@ -265,22 +277,35 @@ def _render_detector_specific_inputs(
         )
 
     elif detector == DetectorType.PRICE_THRESHOLD:
-        p1, p2, p3 = st.columns([2, 1.5, 1])
+        p1, p2 = st.columns([3, 1])
         with p1:
             search_query = st.text_input("Asset / Product / Metric", value=draft.search_query, placeholder="z. B. Goldpreis Euro Feinunze")
         with p2:
-            num_ops = [ComparisonOperator.LTE, ComparisonOperator.LT, ComparisonOperator.GTE, ComparisonOperator.GT]
-            op_idx = num_ops.index(operator) if operator in num_ops else 0
-            operator = st.selectbox("Operator", num_ops, index=op_idx, format_func=lambda o: OPERATOR_LABELS[o])
-        with p3:
-            target_val = st.number_input("Threshold", value=float(draft.target_value if draft.target_value is not None else 100.0), step=1.0)
-        u1, u2, u3 = st.columns([2, 1, 1])
+            unit = st.text_input("Unit", value=draft.unit or "€")
+
+        if use_price_threshold:
+            th1, th2 = st.columns(2)
+            with th1:
+                num_ops = [
+                    ComparisonOperator.LTE,
+                    ComparisonOperator.LT,
+                    ComparisonOperator.GTE,
+                    ComparisonOperator.GT,
+                    ComparisonOperator.EQ,
+                    ComparisonOperator.NEQ,
+                ]
+                op_idx = num_ops.index(operator) if operator in num_ops else 0
+                operator = st.selectbox("Operator", num_ops, index=op_idx, format_func=lambda o: OPERATOR_LABELS[o])
+            with th2:
+                target_val = st.number_input("Threshold", value=float(draft.target_value if draft.target_value is not None else 100.0), step=1.0)
+        else:
+            target_val = None
+
+        u1, u2 = st.columns([2, 1])
         with u1:
             target_url = st.text_input("Product URL (optional)", value=draft.target_url, placeholder="https://...")
         with u2:
             css_sel = st.text_input("CSS Selector (optional)", value=draft.css_selector, placeholder=".price")
-        with u3:
-            unit = st.text_input("Unit", value=draft.unit or "€")
 
     elif detector == DetectorType.PAGE_CHANGE:
         target_url = st.text_input("Target URL", value=draft.target_url, placeholder="https://...")

@@ -12,7 +12,7 @@ from src.config.settings import AppSettings
 from src.detectors.comparators import parse_localized_float
 from src.detectors.engine import AlertEvaluationEngine
 from src.detectors.http_client import SafeHttpFetcher, SafeHttpResponse
-from src.detectors.rule_compiler import AlertRuleCompiler
+from src.detectors.rule_compiler import AlertRuleCompiler, is_pure_value_change_intent
 from src.domain.enums import (
     CheckOutcome,
     ComparisonOperator,
@@ -22,7 +22,12 @@ from src.domain.enums import (
     WeatherMetric,
 )
 from src.domain.models import AlertEvent, AlertRule, ThresholdSpec
-from src.domain.schemas import AiDiscoveredMatch, AiMetricExtraction, AiSearchEvaluation
+from src.domain.schemas import (
+    AiDiscoveredMatch,
+    AiMetricExtraction,
+    AiSearchEvaluation,
+    CompiledAlertDraft,
+)
 from src.storage.repository import SqlAlertRepository
 from src.storage.sqlite_executor import SqliteExecutor
 
@@ -310,3 +315,80 @@ class TestDetectorsAndAntiSpamEngine:
         api_out = engine.evaluate_rule(api_rule)
         assert api_out.outcome == CheckOutcome.TRIGGERED
         repo.close()
+
+    def test_pure_value_change_intent_and_compiler_strip_bogus_threshold(self) -> None:
+        assert is_pure_value_change_intent("Alarmiere, wenn sich der Zusatzbeitragssatz von BKK Firmus ändert.")
+        assert is_pure_value_change_intent("Überwache BKK Firmus Zusatzbeitrag ab 2026 und melde wenn er sich ändert")
+        assert not is_pure_value_change_intent("BKK Firmus Zusatzbeitragssatz >= 2,18 %")
+        assert not is_pure_value_change_intent("Melde dich sobald der Goldpreis unter 2.400 € fällt")
+        assert not is_pure_value_change_intent("Alarmiere wenn der Beitrag über 2,18 % steigt")
+
+        bogus_draft = CompiledAlertDraft(
+            title="BKK Firmus Zusatzbeitragssatz überwachen",
+            detector_type=DetectorType.PRICE_THRESHOLD.value,
+            condition_description="Alarmiere, wenn sich der Zusatzbeitragssatz von BKK Firmus ändert.",
+            search_query="BKK Firmus Zusatzbeitragssatz aktuell",
+            operator=">=",
+            target_value=2.18,
+            unit="%",
+        )
+        compiler = AlertRuleCompiler(llm_gateway=StubLLMGateway(bogus_draft))
+        compiled = compiler.compile_from_prompt(
+            "Alarmiere, wenn sich der Zusatzbeitragssatz von BKK Firmus ändert."
+        )
+        assert compiled.target_value is None
+
+    def test_engine_auto_normalizes_stuck_value_change_rule_and_fires_on_each_change(self) -> None:
+        repo = SqlAlertRepository(SqliteExecutor(":memory:"))
+        notifier = RecordingNotifier()
+
+        rule = AlertRule(
+            id="bkk_stuck",
+            title="BKK Firmus Zusatzbeitragssatz überwachen",
+            user_prompt="Alarmiere, wenn sich der Zusatzbeitragssatz von BKK Firmus ändert.",
+            condition_description="Alarmiere, wenn sich der Zusatzbeitragssatz von BKK Firmus ändert.",
+            detector_type=DetectorType.PRICE_THRESHOLD,
+            target_url="https://bkk.example.com/beitrag",
+            threshold=ThresholdSpec(
+                operator=ComparisonOperator.GTE,
+                target_value=2.18,
+                unit="%",
+                css_selector=".rate",
+            ),
+            trigger_mode=TriggerMode.ON_STATE_CHANGE,
+            last_condition_met=True,
+            last_value_text="2,18 %",
+            total_triggers=3,
+            created_at="2026-11-20T10:00:00+00:00",
+            updated_at="2026-11-21T12:00:00+00:00",
+        )
+        repo.upsert_rule(rule)
+
+        # 1. Lauf bei unverändertem Wert 2,18 % -> normalisiert Regel auf On Value Change & loggt OK (kein Suppressed!)
+        http_same = StubHttpFetcher({"bkk.example.com": (200, "<html><span class='rate'>2,18 %</span></html>")})
+        out1 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=http_same).evaluate_rule(rule)
+        assert out1.outcome == CheckOutcome.OK_NO_MATCH
+        assert out1.rule.threshold.target_value is None
+        assert out1.rule.last_condition_met is False
+        assert len(notifier.sent_events) == 0
+
+        # 2. Lauf: Erhöhung auf 2,50 % -> löst sofort aus!
+        http_up1 = StubHttpFetcher({"bkk.example.com": (200, "<html><span class='rate'>2,50 %</span></html>")})
+        out2 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=http_up1).evaluate_rule(out1.rule)
+        assert out2.outcome == CheckOutcome.TRIGGERED
+        assert out2.rule.last_value_text == "2,5 %"
+        assert len(notifier.sent_events) == 1
+
+        # 3. Lauf: Erneute Änderung auf 2,80 % -> löst erneut aus (nicht durch last_condition_met blockiert!)
+        http_up2 = StubHttpFetcher({"bkk.example.com": (200, "<html><span class='rate'>2,80 %</span></html>")})
+        out3 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=http_up2).evaluate_rule(out2.rule)
+        assert out3.outcome == CheckOutcome.TRIGGERED
+        assert out3.rule.last_value_text == "2,8 %"
+        assert len(notifier.sent_events) == 2
+
+        # 4. Lauf: Unverändert bei 2,80 % -> OK (No Match)
+        out4 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=http_up2).evaluate_rule(out3.rule)
+        assert out4.outcome == CheckOutcome.OK_NO_MATCH
+        assert len(notifier.sent_events) == 2
+        repo.close()
+

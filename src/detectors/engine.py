@@ -16,10 +16,17 @@ from src.detectors.http_client import SafeHttpFetcher
 from src.detectors.llm_gateway import AlertLLMGateway, create_alert_llm_gateway
 from src.detectors.page_change_detector import PageChangeDetector
 from src.detectors.price_threshold_detector import PriceThresholdDetector
+from src.detectors.rule_compiler import is_pure_value_change_intent
 from src.detectors.search_provider import WebSearchProvider, create_web_search_provider
 from src.detectors.weather_detector import WeatherThresholdDetector
 from src.detectors.web_search_detector import WebSearchDetector
-from src.domain.enums import CheckOutcome, DetectorType, RuleStatus, TriggerMode
+from src.domain.enums import (
+    CheckOutcome,
+    ComparisonOperator,
+    DetectorType,
+    RuleStatus,
+    TriggerMode,
+)
 from src.domain.exceptions import AlertBotError
 from src.domain.models import (
     AlertEvent,
@@ -52,6 +59,31 @@ def _parse_iso(ts: str) -> datetime | None:
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except ValueError:
         return None
+
+
+def _normalize_value_change_rule(rule: AlertRule) -> AlertRule:
+    """Korrigiert reine Wertänderungs-Regeln, denen fälschlich ein fixer >=/<= Schwellenwert anhaftet."""
+    if (
+        rule.detector_type != DetectorType.PRICE_THRESHOLD
+        or rule.trigger_mode != TriggerMode.ON_STATE_CHANGE
+        or rule.threshold.target_value is None
+        or rule.threshold.operator not in {ComparisonOperator.GTE, ComparisonOperator.LTE}
+    ):
+        return rule
+    if not is_pure_value_change_intent(rule.condition_description, rule.user_prompt):
+        return rule
+    logger.info(
+        "Normalisiere reine Wertänderungs-Regel '%s' (%s): entferne starren Schwellenwert %s %s.",
+        rule.title,
+        rule.id,
+        rule.threshold.operator.value,
+        rule.threshold.target_value,
+    )
+    return replace(
+        rule,
+        threshold=replace(rule.threshold, target_value=None),
+        last_condition_met=False,
+    )
 
 
 class AlertEvaluationEngine:
@@ -100,6 +132,7 @@ class AlertEvaluationEngine:
         current_dt = now or datetime.now(UTC).replace(microsecond=0)
         now_iso = current_dt.isoformat()
         next_iso = (current_dt + timedelta(minutes=rule.check_interval_minutes)).isoformat()
+        rule = _normalize_value_change_rule(rule)
 
         try:
             raw_finding = self._run_detector(rule)
@@ -145,13 +178,21 @@ class AlertEvaluationEngine:
         if not finding.condition_met:
             return finding, False, ""
 
-        if rule.trigger_mode == TriggerMode.ON_STATE_CHANGE and rule.last_condition_met:
-            return finding, False, "Bedingung weiterhin aktiv (bereits beim Eintritt gemeldet)."
+        is_value_change_rule = (
+            rule.detector_type == DetectorType.PRICE_THRESHOLD
+            and rule.threshold.target_value is None
+        )
+        if (
+            rule.trigger_mode == TriggerMode.ON_STATE_CHANGE
+            and rule.last_condition_met
+            and not is_value_change_rule
+        ):
+            return finding, False, "Bedingung weiterhin aktiv – kein erneuter Alarm (bereits gemeldet)."
 
         if rule.trigger_mode == TriggerMode.COOLDOWN and rule.last_triggered_at:
             last_dt = _parse_iso(rule.last_triggered_at)
             if last_dt and (current_dt - last_dt) < timedelta(minutes=rule.cooldown_minutes):
-                return finding, False, f"Cooldown ({rule.cooldown_minutes} Min.) läuft noch."
+                return finding, False, f"Cooldown aktiv ({rule.cooldown_minutes} Min.) – kein erneuter Alarm."
 
         return finding, True, ""
 

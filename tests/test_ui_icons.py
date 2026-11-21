@@ -96,8 +96,20 @@ class TestAppIconsAndSubtleUi:
                 rule_id="rule_1",
                 outcome=CheckOutcome.OK_NO_MATCH,
                 message="Measured 2.45 % (below 2.5 %)",
+                measured_display="2,45 %",
                 duration_ms=88,
                 created_at="2026-11-13T10:05:00+00:00",
+            )
+        )
+        repo.append_check_log(
+            CheckLogEntry(
+                id="log_r2",
+                rule_id="rule_1",
+                outcome=CheckOutcome.SUPPRESSED,
+                message="Bedingung weiterhin aktiv – kein erneuter Alarm (bereits gemeldet).",
+                measured_display="2,60 %",
+                duration_ms=95,
+                created_at="2026-11-13T10:06:00+00:00",
             )
         )
         repo.close()
@@ -139,7 +151,9 @@ class TestAppIconsAndSubtleUi:
         assert all(exp.proto.expanded is False for exp in at.expander)
         log_expanders = [exp for exp in at.expander if exp.label == "📋 Check Logs"]
         assert len(log_expanders) == 3
-        assert any("Measured 2.45 %" in m.value for m in at.markdown)
+        assert any("Measured 2.45 %" in m.value and "`2,45 %`" in m.value for m in at.markdown)
+        assert any("Already Notified" in m.value and "`2,60 %`" in m.value for m in at.markdown)
+        assert not any("Suppressed (Active / Cooldown)" in m.value for m in at.markdown)
 
         # Lösch-Absicherung: erster Klick löscht nicht, sondern fordert Checkbox + Bestätigung an
         at = at.button(key="del_rule_3").click().run()

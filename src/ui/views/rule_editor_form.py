@@ -153,7 +153,14 @@ def _render_detector_fields(rule: AlertRule, kp: str) -> tuple[str, str, Thresho
         if use_threshold:
             t1, t2 = st.columns(2)
             with t1:
-                num_ops = [ComparisonOperator.LTE, ComparisonOperator.LT, ComparisonOperator.GTE, ComparisonOperator.GT, ComparisonOperator.EQ]
+                num_ops = [
+                    ComparisonOperator.LTE,
+                    ComparisonOperator.LT,
+                    ComparisonOperator.GTE,
+                    ComparisonOperator.GT,
+                    ComparisonOperator.EQ,
+                    ComparisonOperator.NEQ,
+                ]
                 op_idx = num_ops.index(spec.operator) if spec.operator in num_ops else 0
                 operator = st.selectbox("Operator", num_ops, index=op_idx, format_func=lambda o: OPERATOR_LABELS[o], key=f"{kp}_op")
             with t2:
