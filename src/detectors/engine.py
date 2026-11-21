@@ -13,9 +13,10 @@ from src.config.constants import MAX_CONSECUTIVE_FAILURES_BEFORE_ERROR
 from src.config.settings import AppSettings
 from src.detectors.http_api_detector import HttpApiDetector
 from src.detectors.http_client import SafeHttpFetcher
-from src.detectors.llm_gateway import AlertLLMGateway, GeminiAlertGateway
+from src.detectors.llm_gateway import AlertLLMGateway, create_alert_llm_gateway
 from src.detectors.page_change_detector import PageChangeDetector
 from src.detectors.price_threshold_detector import PriceThresholdDetector
+from src.detectors.search_provider import WebSearchProvider, create_web_search_provider
 from src.detectors.weather_detector import WeatherThresholdDetector
 from src.detectors.web_search_detector import WebSearchDetector
 from src.domain.enums import CheckOutcome, DetectorType, RuleStatus, TriggerMode
@@ -63,18 +64,33 @@ class AlertEvaluationEngine:
         notifier: AlertNotificationSink,
         http_fetcher: SafeHttpFetcher | None = None,
         llm_gateway: AlertLLMGateway | None = None,
+        search_provider: WebSearchProvider | None = None,
     ) -> None:
         self._settings = settings
         self._repo = repository
         self._notifier = notifier
         self._http = http_fetcher or SafeHttpFetcher()
-        self._llm = llm_gateway or (
-            GeminiAlertGateway(settings) if settings.has_gemini_configured else None
-        )
+        self._llm = llm_gateway or create_alert_llm_gateway(settings)
+        self._search_provider = search_provider or create_web_search_provider(self._http)
         prompts = settings.prompts
-        self._weather = WeatherThresholdDetector(self._http, self._llm, prompts.metric_extract_system_prompt)
-        self._web_search = WebSearchDetector(self._http, self._llm, prompts.web_search_system_prompt)
-        self._price = PriceThresholdDetector(self._http, self._llm, prompts.metric_extract_system_prompt)
+        self._weather = WeatherThresholdDetector(
+            self._http,
+            self._llm,
+            prompts.metric_extract_system_prompt,
+            search_provider=self._search_provider,
+        )
+        self._web_search = WebSearchDetector(
+            self._http,
+            self._llm,
+            prompts.web_search_system_prompt,
+            search_provider=self._search_provider,
+        )
+        self._price = PriceThresholdDetector(
+            self._http,
+            self._llm,
+            prompts.metric_extract_system_prompt,
+            search_provider=self._search_provider,
+        )
         self._page_change = PageChangeDetector(self._http, self._llm, prompts.page_change_system_prompt)
         self._http_api = HttpApiDetector(self._http)
 

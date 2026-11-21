@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.config.constants import INTERVAL_PRESETS_MINUTES
 from src.config.settings import AppSettings
-from src.detectors.llm_gateway import GeminiAlertGateway
+from src.detectors.llm_gateway import create_alert_llm_gateway
 from src.detectors.rule_compiler import AlertRuleCompiler
 from src.domain.enums import (
     CheckOutcome,
@@ -49,7 +49,7 @@ _QUICK_TEMPLATES: dict[str, str] = {
 
 
 def _build_compiler(settings: AppSettings) -> AlertRuleCompiler:
-    llm = GeminiAlertGateway(settings) if settings.has_gemini_configured else None
+    llm = create_alert_llm_gateway(settings)
     return AlertRuleCompiler(llm_gateway=llm, compiler_prompt=settings.prompts.compiler_system_prompt)
 
 

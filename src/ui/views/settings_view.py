@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ki_brain
 import streamlit as st
 
 from src.config.settings import AppSettings
@@ -20,7 +21,10 @@ def render_settings_view(
 
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Database", repository.backend_name)
-    s2.metric("Gemini AI", "✅ Active" if settings.has_gemini_configured else "⚪ Heuristic")
+    if ki_brain.is_configured():
+        s2.metric("AI Engine", "🧠 KI-Brain")
+    else:
+        s2.metric("Gemini AI", "✅ Active" if settings.has_gemini_configured else "⚪ Heuristic")
     s3.metric("Email (Resend)", "✅ Ready" if settings.has_email_configured else "⚠️ Not set")
     s4.metric("Worker", "☁️ GitHub Actions" if dispatcher.uses_cloud_worker else "💻 Local")
 

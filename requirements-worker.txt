@@ -4,3 +4,4 @@ requests>=2.32.3
 beautifulsoup4>=4.12.3
 pyyaml>=6.0.2
 python-dotenv>=1.0.1
+bot-dashboard @ git+https://github.com/hschenke/bot-dashboard.git@main

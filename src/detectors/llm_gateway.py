@@ -1,4 +1,4 @@
-"""Moderner Google Gemini Interactions API Client (`google-genai` >= 2.30.1) für Alert-Bot."""
+"""KI-Gateways (`ki_brain` & Google Gemini Interactions API Fallback) für Alert-Bot."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import re
 import time
 from typing import Any, Protocol, TypeVar
 
+import ki_brain
 from google import genai
 from pydantic import BaseModel
 
@@ -180,16 +181,7 @@ class GeminiAlertGateway:
             except Exception as exc:
                 logger.info("Google-Search Fallback nicht verfügbar (%s).", exc)
 
-        citation_lines = "\n".join(
-            f"- {title or 'Quelle'}: {url}" for title, url in citations[:12]
-        )
-        synthesis_prompt = (
-            f"Ursprünglicher Prüfauftrag:\n{prompt}\n\n"
-            f"Aktuelle Web-Recherche-Ergebnisse:\n{grounded_text}\n\n"
-            f"Verifizierte Quell-URLs:\n{citation_lines or '(keine separaten URLs)'}\n\n"
-            "Überführe dieses Ergebnis jetzt wahrheitsgetreu in das geforderte JSON-Schema. "
-            "Verwende ausschließlich tatsächlich gefundene Fakten und echte URLs aus obiger Recherche."
-        )
+        synthesis_prompt = _build_synthesis_prompt(prompt, grounded_text, citations)
         try:
             return self.generate_structured(
                 prompt=synthesis_prompt,
@@ -197,19 +189,13 @@ class GeminiAlertGateway:
                 schema_cls=schema_cls,
             )
         except Exception as exc:
-            return self._fallback_grounded_structured(schema_cls, grounded_text, citations, exc)
+            return _fallback_grounded_structured(schema_cls, grounded_text, citations, exc)
 
     @staticmethod
     def _run_free_web_search(prompt: str) -> tuple[str, list[tuple[str, str]]]:
         from src.detectors.search_provider import FreeWebSearchProvider
 
-        query = ""
-        for line in prompt.splitlines():
-            if any(k in line for k in ("Suchfokus:", "Suchanfrage:", "Kennzahl / Asset:", "Überwachungsauftrag:")):
-                query = line.split(":", 1)[-1].strip()
-                break
-        clean_q = query or prompt[:120].strip()
-        items = FreeWebSearchProvider().search(clean_q)
+        items = FreeWebSearchProvider().search(_extract_search_query(prompt))
         if not items:
             return "Keine aktuellen Web-Treffer ermittelbar.", []
         text_lines = [f"- {it.title}: {it.summary} ({it.url})" for it in items]
@@ -223,19 +209,7 @@ class GeminiAlertGateway:
         citations: list[tuple[str, str]],
         exc: Exception,
     ) -> SchemaT:
-        name = schema_cls.__name__
-        if "AiSearchEvaluation" in name:
-            from src.domain.schemas import AiDiscoveredMatch
-
-            matches = [AiDiscoveredMatch(title=t, url=u, summary=t) for t, u in citations[:5]]
-            return schema_cls(condition_met=bool(matches), summary=f"{len(matches)} Treffer im Web gefunden.", matches=matches)  # type: ignore[return-value]
-        if "AiMetricExtraction" in name:
-            from src.detectors.comparators import parse_localized_float
-
-            val = parse_localized_float(text)
-            src_url = citations[0][1] if citations else ""
-            return schema_cls(value_found=(val is not None), numeric_value=val, source_url=src_url)  # type: ignore[return-value]
-        raise LLMProviderError(f"KI-Synthese fehlgeschlagen: {exc}") from exc
+        return _fallback_grounded_structured(schema_cls, text, citations, exc)
 
     def _run_google_search(
         self,
@@ -277,3 +251,144 @@ class GeminiAlertGateway:
                     time.sleep(RETRY_BACKOFF_BASE_SECONDS * (attempt + 1))
 
         raise LLMProviderError(f"KI-Websuche fehlgeschlagen: {last_exc}")
+
+
+def _extract_search_query(prompt: str) -> str:
+    """Extrahiert eine prägnante Suchanfrage aus strukturierten Prüf-Prompts."""
+    for line in prompt.splitlines():
+        if any(k in line for k in ("Suchfokus:", "Suchanfrage:", "Kennzahl / Asset:", "Überwachungsauftrag:")):
+            extracted = line.split(":", 1)[-1].strip()
+            if extracted:
+                return extracted
+    return prompt[:120].strip()
+
+
+def _build_synthesis_prompt(
+    prompt: str,
+    grounded_text: str,
+    citations: list[tuple[str, str]],
+) -> str:
+    """Formt den Synthese-Prompt mit verifizierten Web-Ergebnissen und Quell-URLs."""
+    citation_lines = "\n".join(f"- {title or 'Quelle'}: {url}" for title, url in citations[:12])
+    return (
+        f"Ursprünglicher Prüfauftrag:\n{prompt}\n\n"
+        f"Aktuelle Web-Recherche-Ergebnisse:\n{grounded_text}\n\n"
+        f"Verifizierte Quell-URLs:\n{citation_lines or '(keine separaten URLs)'}\n\n"
+        "Überführe dieses Ergebnis jetzt wahrheitsgetreu in das geforderte JSON-Schema. "
+        "Verwende ausschließlich tatsächlich gefundene Fakten und echte URLs aus obiger Recherche."
+    )
+
+
+def _format_brain_citations(raw_citations: Any) -> tuple[str, list[tuple[str, str]]]:
+    """Normalisiert `BrainCitation`-Einträge zu bereinigtem Kontexttext und `(title, url)`-Liste."""
+    citations: list[tuple[str, str]] = []
+    text_lines: list[str] = []
+    seen_urls: set[str] = set()
+    for item in raw_citations or []:
+        safe_url = sanitize_display_url(str(getattr(item, "url", "") or ""))
+        url = "" if safe_url == "#" else safe_url
+        if url and url in seen_urls:
+            continue
+        title = str(getattr(item, "title", "") or "").strip()[:160]
+        snippet = str(getattr(item, "snippet", "") or "").strip()[:280]
+        if url:
+            seen_urls.add(url)
+            citations.append((title or url, url))
+        if title or snippet or url:
+            label = title or url or "Quelle"
+            body = f": {snippet}" if snippet else ""
+            suffix = f" ({url})" if url else ""
+            text_lines.append(f"- {label}{body}{suffix}")
+    if not text_lines:
+        return "Keine aktuellen Web-Treffer ermittelbar.", []
+    return "\n".join(text_lines), citations
+
+
+def _fallback_grounded_structured(
+    schema_cls: type[SchemaT],
+    text: str,
+    citations: list[tuple[str, str]],
+    exc: Exception,
+) -> SchemaT:
+    """Erstellt bei fehlgeschlagener KI-Synthese ein sicheres Fallback-Ergebnis für bekannte Schemata."""
+    name = schema_cls.__name__
+    if "AiSearchEvaluation" in name:
+        from src.domain.schemas import AiDiscoveredMatch
+
+        matches = [AiDiscoveredMatch(title=t, url=u, summary=t) for t, u in citations[:5]]
+        return schema_cls(condition_met=bool(matches), summary=f"{len(matches)} Treffer im Web gefunden.", matches=matches)  # type: ignore[return-value]
+    if "AiMetricExtraction" in name:
+        from src.detectors.comparators import parse_localized_float
+
+        val = parse_localized_float(text)
+        src_url = citations[0][1] if citations else ""
+        return schema_cls(value_found=(val is not None), numeric_value=val, source_url=src_url)  # type: ignore[return-value]
+    raise LLMProviderError(f"KI-Synthese fehlgeschlagen: {exc}") from exc
+
+
+class BrainAlertGateway:
+    """Zentrales KI-Gateway auf Basis von `ki_brain` (`KI_BRAIN_KEY`, strikt `allow_paid=False`)."""
+
+    def generate_structured(
+        self,
+        prompt: str,
+        system_instruction: str,
+        schema_cls: type[SchemaT],
+    ) -> SchemaT:
+        """Erzeugt validierten JSON-Structured-Output über `ki_brain` (Tier `fast`, kostenfrei)."""
+        try:
+            with ki_brain.connect() as brain:
+                return brain.generate_structured(
+                    prompt,
+                    schema_cls,
+                    tier="fast",
+                    system_instruction=system_instruction,
+                    allow_paid=False,
+                )[0]
+        except Exception as exc:
+            logger.warning("KI-Brain Struktur-Aufruf fehlgeschlagen: %s", exc)
+            raise LLMProviderError(f"KI-Brain Strukturanalyse fehlgeschlagen: {exc}") from exc
+
+    def generate_grounded_structured(
+        self,
+        prompt: str,
+        system_instruction: str,
+        schema_cls: type[SchemaT],
+    ) -> SchemaT:
+        """Führt Websuche (`tier="standard"`) + Synthese (`tier="fast"`) strikt kostenfrei aus."""
+        query = _extract_search_query(prompt)
+        grounded_text = "Keine aktuellen Web-Treffer ermittelbar."
+        citations: list[tuple[str, str]] = []
+        try:
+            with ki_brain.connect() as brain:
+                try:
+                    search_res = brain.search(query, tier="standard", allow_paid=False)
+                    grounded_text, citations = _format_brain_citations(search_res.citations)
+                except Exception as exc:
+                    logger.warning("KI-Brain Websuche fehlgeschlagen: %s", exc)
+
+                synthesis_prompt = _build_synthesis_prompt(prompt, grounded_text, citations)
+                try:
+                    return brain.generate_structured(
+                        synthesis_prompt,
+                        schema_cls,
+                        tier="fast",
+                        system_instruction=system_instruction,
+                        allow_paid=False,
+                    )[0]
+                except Exception as exc:
+                    return _fallback_grounded_structured(schema_cls, grounded_text, citations, exc)
+        except LLMProviderError:
+            raise
+        except Exception as exc:
+            logger.warning("KI-Brain Verbindung fehlgeschlagen: %s", exc)
+            raise LLMProviderError(f"KI-Brain Websuche fehlgeschlagen: {exc}") from exc
+
+
+def create_alert_llm_gateway(settings: AppSettings) -> AlertLLMGateway | None:
+    """Liefert `BrainAlertGateway` bei aktivem `KI_BRAIN_KEY`, sonst Gemini-Fallback oder `None`."""
+    if ki_brain.is_configured():
+        return BrainAlertGateway()
+    if settings.has_gemini_configured:
+        return GeminiAlertGateway(settings)
+    return None
