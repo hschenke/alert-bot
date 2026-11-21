@@ -335,4 +335,155 @@ def test_price_detector_respects_llm_rejection_of_outlier_and_falls_back_to_dire
     assert finding.source_url == "https://www.bkk-firmus.de/zusatzbeitrag"
 
 
+def test_weather_detector_falls_back_to_bright_sky_dwd_when_open_meteo_times_out(monkeypatch) -> None:
+    import json
+
+    from src.detectors import weather_detector
+    from src.domain.exceptions import DetectorExecutionError
+
+    monkeypatch.setattr(weather_detector.time, "sleep", lambda _s: None)
+    geo_json = json.dumps(
+        {"results": [{"name": "Berlin", "country": "Deutschland", "latitude": 52.52, "longitude": 13.405}]}
+    )
+    bright_sky_json = json.dumps({"weather": {"temperature": 3.4, "wind_speed_10": 14.2, "precipitation_10": 0.0}})
+
+    class TimeoutOpenMeteoFetcher(SafeHttpFetcher):
+        def fetch(self, url: str, headers: dict[str, str] | None = None) -> SafeHttpResponse:
+            if "geocoding-api.open-meteo.com" in url:
+                return SafeHttpResponse(url, 200, "application/json", geo_json, 10)
+            if "api.open-meteo.com/v1/forecast" in url:
+                raise DetectorExecutionError("HTTP-Abruf fehlgeschlagen: Read timed out.")
+            if "api.brightsky.dev/current_weather" in url:
+                return SafeHttpResponse(url, 200, "application/json", bright_sky_json, 15)
+            return SafeHttpResponse(url, 404, "text/plain", "Not Found", 5)
+
+    detector = WeatherThresholdDetector(http_fetcher=TimeoutOpenMeteoFetcher(), llm_gateway=None)
+    rule = AlertRule(
+        id="wx_dwd",
+        title="Temperaturwarnung Berlin Frost",
+        user_prompt="Temperatur in Berlin <= 0 °C",
+        detector_type=DetectorType.WEATHER_THRESHOLD,
+        threshold=ThresholdSpec(
+            operator=ComparisonOperator.LTE,
+            target_value=0.0,
+            weather_metric=WeatherMetric.TEMPERATURE_C,
+            location_name="Berlin",
+            unit="°C",
+        ),
+    )
+    finding = detector.evaluate(rule)
+    assert finding.measured_value == 3.4
+    assert finding.condition_met is False
+    assert finding.source_url == "https://brightsky.dev/"
+    assert "Berlin, Deutschland" in finding.measured_display
+
+
+def test_weather_detector_falls_back_to_wttr_in_for_apparent_temperature() -> None:
+    import json
+
+    wttr_json = json.dumps({"current_condition": [{"temp_C": "4", "FeelsLikeC": "-1.5", "windspeedKmph": "18", "precipMM": "0.0"}]})
+    fetcher = DummySearchHttpFetcher({"wttr.in/Berlin": wttr_json})
+    detector = WeatherThresholdDetector(http_fetcher=fetcher, llm_gateway=None)
+
+    rule = AlertRule(
+        id="wx_wttr",
+        title="Gefühlte Temperatur Berlin",
+        user_prompt="Gefühlte Temperatur Berlin <= 0 °C",
+        detector_type=DetectorType.WEATHER_THRESHOLD,
+        threshold=ThresholdSpec(
+            operator=ComparisonOperator.LTE,
+            target_value=0.0,
+            weather_metric=WeatherMetric.APPARENT_TEMPERATURE_C,
+            location_name="Berlin",
+            unit="°C",
+        ),
+    )
+    finding = detector.evaluate(rule)
+    assert finding.measured_value == -1.5
+    assert finding.condition_met is True
+    assert finding.source_url == "https://wttr.in/"
+
+
+def test_weather_detector_retries_transient_open_meteo_timeout(monkeypatch) -> None:
+    import json
+
+    from src.detectors import weather_detector
+    from src.domain.exceptions import DetectorExecutionError
+
+    monkeypatch.setattr(weather_detector.time, "sleep", lambda _s: None)
+    geo_json = json.dumps(
+        {"results": [{"name": "Berlin", "country": "Deutschland", "latitude": 52.52, "longitude": 13.405}]}
+    )
+    wx_json = json.dumps({"current": {"temperature_2m": 5.2}})
+    forecast_attempts = {"count": 0}
+
+    class FlakyOpenMeteoFetcher(SafeHttpFetcher):
+        def fetch(self, url: str, headers: dict[str, str] | None = None) -> SafeHttpResponse:
+            if "geocoding-api.open-meteo.com" in url:
+                return SafeHttpResponse(url, 200, "application/json", geo_json, 10)
+            if "api.open-meteo.com/v1/forecast" in url:
+                forecast_attempts["count"] += 1
+                if forecast_attempts["count"] == 1:
+                    raise DetectorExecutionError("HTTP-Abruf fehlgeschlagen: Read timed out.")
+                return SafeHttpResponse(url, 200, "application/json", wx_json, 20)
+            return SafeHttpResponse(url, 404, "text/plain", "Not Found", 5)
+
+    detector = WeatherThresholdDetector(http_fetcher=FlakyOpenMeteoFetcher(), llm_gateway=None)
+    rule = AlertRule(
+        id="wx_retry",
+        title="Berlin Frost",
+        user_prompt="Berlin <= 0 °C",
+        detector_type=DetectorType.WEATHER_THRESHOLD,
+        threshold=ThresholdSpec(
+            operator=ComparisonOperator.LTE,
+            target_value=0.0,
+            weather_metric=WeatherMetric.TEMPERATURE_C,
+            location_name="Berlin",
+            unit="°C",
+        ),
+    )
+    finding = detector.evaluate(rule)
+    assert forecast_attempts["count"] == 2
+    assert finding.measured_value == 5.2
+    assert finding.source_url == "https://open-meteo.com/"
+
+
+def test_weather_web_fallback_rejects_wikipedia_historical_temperature_records() -> None:
+    import pytest
+    from src.domain.exceptions import DetectorExecutionError
+    from src.domain.models import DiscoveredItem
+
+    class WikiOnlySearchProvider:
+        def search(self, query: str, max_results: int = 10) -> list[DiscoveredItem]:
+            return [
+                DiscoveredItem(
+                    fingerprint="wiki_rec",
+                    title="Zeitreihe der Lufttemperatur in Deutschland",
+                    url="https://de.wikipedia.org/wiki/Zeitreihe_der_Lufttemperatur_in_Deutschland",
+                    summary="Der Hitzerekord in Berlin lag bei 39,9 °C.",
+                )
+            ]
+
+    detector = WeatherThresholdDetector(
+        http_fetcher=DummySearchHttpFetcher({}),
+        llm_gateway=None,
+        search_provider=WikiOnlySearchProvider(),
+    )
+    rule = AlertRule(
+        id="wx_no_wiki",
+        title="Temperaturwarnung Berlin Frost",
+        user_prompt="Temperatur in Berlin <= 0 °C",
+        detector_type=DetectorType.WEATHER_THRESHOLD,
+        threshold=ThresholdSpec(
+            operator=ComparisonOperator.LTE,
+            target_value=0.0,
+            weather_metric=WeatherMetric.TEMPERATURE_C,
+            location_name="Berlin",
+            unit="°C",
+        ),
+    )
+    with pytest.raises(DetectorExecutionError, match="Keine aktuellen Live-Wetterdaten"):
+        detector.evaluate(rule)
+
+
 
