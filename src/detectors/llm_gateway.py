@@ -1,4 +1,4 @@
-"""KI-Gateways (`ki_brain` & Google Gemini Interactions API Fallback) für Alert-Bot."""
+"""AI-Gateways (`ai_brain` & Google Gemini Interactions API Fallback) für Alert-Bot."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import re
 import time
 from typing import Any, Protocol, TypeVar
 
-import ki_brain
+import ai_brain
+from ai_brain import BrainError
 from google import genai
 from pydantic import BaseModel
 
@@ -327,7 +328,23 @@ def _fallback_grounded_structured(
 
 
 class BrainAlertGateway:
-    """Zentrales KI-Gateway auf Basis von `ki_brain` (`KI_BRAIN_KEY`, strikt `allow_paid=False`)."""
+    """Zentrales AI-Gateway auf Basis von `ai_brain` (`AI_BRAIN_KEY`, dynamisches `tier="auto"`-Routing)."""
+
+    def __init__(
+        self,
+        settings: AppSettings | None = None,
+        fallback_gateway: AlertLLMGateway | None = None,
+    ) -> None:
+        self._settings = settings
+        self._fallback = fallback_gateway
+
+    def _resolve_fallback(self) -> AlertLLMGateway | None:
+        if self._fallback is not None:
+            return self._fallback
+        if self._settings is not None and self._settings.has_gemini_configured:
+            self._fallback = GeminiAlertGateway(self._settings)
+            return self._fallback
+        return None
 
     def generate_structured(
         self,
@@ -335,19 +352,56 @@ class BrainAlertGateway:
         system_instruction: str,
         schema_cls: type[SchemaT],
     ) -> SchemaT:
-        """Erzeugt validierten JSON-Structured-Output über `ki_brain` (Tier `fast`, kostenfrei)."""
+        """Erzeugt validierten JSON-Structured-Output über `ai_brain` (`tier="auto"`, App-Policy)."""
         try:
-            with ki_brain.connect() as brain:
+            with ai_brain.connect() as brain:
                 return brain.generate_structured(
                     prompt,
                     schema_cls,
-                    tier="fast",
+                    tier="auto",
                     system_instruction=system_instruction,
-                    allow_paid=False,
+                    allow_paid=None,
                 )[0]
+        except BrainError as exc:
+            logger.warning("AI-Brain Struktur-Aufruf fehlgeschlagen: %s", exc)
+            fallback = self._resolve_fallback()
+            if fallback is not None:
+                logger.info("Nutze Gemini-Fallback für Strukturanalyse nach AI-Brain-Fehler.")
+                return fallback.generate_structured(prompt, system_instruction, schema_cls)
+            raise LLMProviderError(f"AI-Brain Strukturanalyse fehlgeschlagen: {exc}") from exc
         except Exception as exc:
-            logger.warning("KI-Brain Struktur-Aufruf fehlgeschlagen: %s", exc)
-            raise LLMProviderError(f"KI-Brain Strukturanalyse fehlgeschlagen: {exc}") from exc
+            logger.warning("AI-Brain Struktur-Aufruf fehlgeschlagen: %s", exc)
+            raise LLMProviderError(f"AI-Brain Strukturanalyse fehlgeschlagen: {exc}") from exc
+
+    def _synthesize_grounded(
+        self,
+        brain: Any,
+        prompt: str,
+        system_instruction: str,
+        schema_cls: type[SchemaT],
+        grounded_text: str,
+        citations: list[tuple[str, str]],
+    ) -> SchemaT:
+        synthesis_prompt = _build_synthesis_prompt(prompt, grounded_text, citations)
+        try:
+            return brain.generate_structured(
+                synthesis_prompt,
+                schema_cls,
+                tier="auto",
+                system_instruction=system_instruction,
+                allow_paid=None,
+            )[0]
+        except BrainError as exc:
+            fallback = self._resolve_fallback()
+            if fallback is not None:
+                logger.info("Nutze Gemini-Fallback für AI-Brain-Synthese nach Fehler: %s", exc)
+                try:
+                    return fallback.generate_structured(synthesis_prompt, system_instruction, schema_cls)
+                except Exception as fb_exc:
+                    return _fallback_grounded_structured(schema_cls, grounded_text, citations, fb_exc)
+            return _fallback_grounded_structured(schema_cls, grounded_text, citations, exc)
+        except Exception as exc:
+            return _fallback_grounded_structured(schema_cls, grounded_text, citations, exc)
 
     def generate_grounded_structured(
         self,
@@ -355,40 +409,38 @@ class BrainAlertGateway:
         system_instruction: str,
         schema_cls: type[SchemaT],
     ) -> SchemaT:
-        """Führt Websuche (`tier="standard"`) + Synthese (`tier="fast"`) strikt kostenfrei aus."""
+        """Führt Websuche + Synthese über `ai_brain` (`tier="auto"`, App-Policy) aus."""
         query = _extract_search_query(prompt)
         grounded_text = "Keine aktuellen Web-Treffer ermittelbar."
         citations: list[tuple[str, str]] = []
         try:
-            with ki_brain.connect() as brain:
+            with ai_brain.connect() as brain:
                 try:
-                    search_res = brain.search(query, tier="standard", allow_paid=False)
+                    search_res = brain.search(query, tier="auto", allow_paid=None)
                     grounded_text, citations = _format_brain_citations(search_res.citations)
                 except Exception as exc:
-                    logger.warning("KI-Brain Websuche fehlgeschlagen: %s", exc)
-
-                synthesis_prompt = _build_synthesis_prompt(prompt, grounded_text, citations)
-                try:
-                    return brain.generate_structured(
-                        synthesis_prompt,
-                        schema_cls,
-                        tier="fast",
-                        system_instruction=system_instruction,
-                        allow_paid=False,
-                    )[0]
-                except Exception as exc:
-                    return _fallback_grounded_structured(schema_cls, grounded_text, citations, exc)
+                    logger.warning("AI-Brain Websuche fehlgeschlagen: %s", exc)
+                return self._synthesize_grounded(
+                    brain, prompt, system_instruction, schema_cls, grounded_text, citations
+                )
         except LLMProviderError:
             raise
+        except BrainError as exc:
+            logger.warning("AI-Brain Verbindung fehlgeschlagen: %s", exc)
+            fallback = self._resolve_fallback()
+            if fallback is not None:
+                logger.info("Nutze Gemini-Fallback für Grounded-Websuche nach AI-Brain-Fehler.")
+                return fallback.generate_grounded_structured(prompt, system_instruction, schema_cls)
+            raise LLMProviderError(f"AI-Brain Websuche fehlgeschlagen: {exc}") from exc
         except Exception as exc:
-            logger.warning("KI-Brain Verbindung fehlgeschlagen: %s", exc)
-            raise LLMProviderError(f"KI-Brain Websuche fehlgeschlagen: {exc}") from exc
+            logger.warning("AI-Brain Verbindung fehlgeschlagen: %s", exc)
+            raise LLMProviderError(f"AI-Brain Websuche fehlgeschlagen: {exc}") from exc
 
 
 def create_alert_llm_gateway(settings: AppSettings) -> AlertLLMGateway | None:
-    """Liefert `BrainAlertGateway` bei aktivem `KI_BRAIN_KEY`, sonst Gemini-Fallback oder `None`."""
-    if ki_brain.is_configured():
-        return BrainAlertGateway()
+    """Liefert `BrainAlertGateway` bei aktivem `AI_BRAIN_KEY`, sonst Gemini-Fallback oder `None`."""
+    if ai_brain.is_configured():
+        return BrainAlertGateway(settings=settings)
     if settings.has_gemini_configured:
         return GeminiAlertGateway(settings)
     return None

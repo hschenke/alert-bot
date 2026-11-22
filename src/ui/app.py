@@ -117,4 +117,4 @@ def run_streamlit_app() -> None:
     elif selected_page == PAGE_ALERT_HISTORY:
         render_events_view(repository, role=role)
     else:
-        render_settings_view(settings, repository, dispatcher)
+        render_settings_view(settings, repository, dispatcher, role=role)

@@ -72,7 +72,7 @@ python -m pip install -r requirements.txt
 
 # 3. Umgebungsvariablen anlegen
 Copy-Item .env.example .env
-# -> GEMINI_API_KEY und optional RESEND_API_KEY / EMAIL_TO in .env eintragen
+# -> AI_BRAIN_KEY (oder optional GEMINI_API_KEY als Fallback) sowie RESEND_API_KEY / EMAIL_TO in .env eintragen
 #    (Wetter-, Uptime- & Seiten-Checks funktionieren sogar komplett ohne API-Key!)
 
 # 4. Web-App starten
@@ -95,7 +95,7 @@ streamlit run streamlit_app.py
 
 ### 2. GitHub Repository Secrets hinterlegen
 Unter **GitHub -> Settings -> Secrets and variables -> Actions** eintragen:
-- `GEMINI_API_KEY`
+- `AI_BRAIN_KEY` *(1-Secret Plug-&-Play für zentrales AI-Brain; optional zusätzlich `GEMINI_API_KEY` als Fallback)*
 - `TURSO_URL` & `TURSO_KEY`
 - `RESEND_API_KEY`, `EMAIL_TO` (und optional `EMAIL_FROM`)
 - `APP_PASSWORD` & `STREAMLIT_APP_URL`

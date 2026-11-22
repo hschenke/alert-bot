@@ -49,7 +49,7 @@ jobs:
           TARGET_RULE_ID: ${{ inputs.rule_id }}
           FORCE_CHECK: ${{ inputs.force }}
           WORKER_ID: "gh-run-${{ github.run_id }}"
-          KI_BRAIN_KEY: ${{ secrets.KI_BRAIN_KEY }}
+          AI_BRAIN_KEY: ${{ secrets.AI_BRAIN_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
           GEMINI_DEEP_MODEL: ${{ secrets.GEMINI_DEEP_MODEL || 'gemini-3.8-flash' }}

@@ -1,4 +1,4 @@
-"""Web-Such-Provider (`ki_brain` + kostenfreier Multi-Engine-Fallback via DuckDuckGo, Yahoo & Google News)."""
+"""Web-Such-Provider (`ai_brain` + kostenfreier Multi-Engine-Fallback via DuckDuckGo, Yahoo & Google News)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from typing import Protocol
 
-import ki_brain
+import ai_brain
+from ai_brain import BrainError
 from bs4 import BeautifulSoup
-from ki_brain import BrainError
 
 from src.config.constants import MAX_DISCOVERED_ITEMS_PER_CHECK
 from src.detectors.http_client import SafeHttpFetcher
@@ -235,7 +235,7 @@ def _map_brain_citation(citation: object) -> DiscoveredItem | None:
 
 
 class BrainWebSearchProvider:
-    """Web-Such-Provider über `ki_brain` (`tier="fast"`, `allow_paid=False`) mit Free-Fallback."""
+    """Web-Such-Provider über `ai_brain` (`tier="auto"`, App-Policy inkl. Maps) mit Free-Fallback."""
 
     def __init__(
         self,
@@ -249,22 +249,22 @@ class BrainWebSearchProvider:
         query: str,
         max_results: int = MAX_DISCOVERED_ITEMS_PER_CHECK,
     ) -> list[DiscoveredItem]:
-        """Führt eine kostenfreie `ki_brain`-Suche aus und fällt bei `BrainError` zurück."""
+        """Führt eine `ai_brain`-Suche gemäß App-Policy aus und fällt bei `BrainError` zurück."""
         clean_query = query.strip()
         if not clean_query:
             return []
 
         limit = max(1, min(max_results, MAX_DISCOVERED_ITEMS_PER_CHECK))
         try:
-            with ki_brain.connect() as brain:
+            with ai_brain.connect() as brain:
                 search_res = brain.search(
                     clean_query,
-                    tier="fast",
+                    tier="auto",
                     max_results=limit,
-                    allow_paid=False,
+                    allow_paid=None,
                 )
         except BrainError as exc:
-            logger.warning("KI-Brain Websuche fehlgeschlagen (%s) – nutze FreeWebSearchProvider.", exc)
+            logger.warning("AI-Brain Websuche fehlgeschlagen (%s) – nutze FreeWebSearchProvider.", exc)
             return self._fallback.search(clean_query, max_results=limit)
 
         items: list[DiscoveredItem] = []
@@ -280,7 +280,7 @@ class BrainWebSearchProvider:
 def create_web_search_provider(
     http_fetcher: SafeHttpFetcher | None = None,
 ) -> WebSearchProvider:
-    """Liefert `BrainWebSearchProvider` bei aktivem `KI_BRAIN_KEY`, sonst `FreeWebSearchProvider`."""
-    if ki_brain.is_configured():
+    """Liefert `BrainWebSearchProvider` bei aktivem `AI_BRAIN_KEY`, sonst `FreeWebSearchProvider`."""
+    if ai_brain.is_configured():
         return BrainWebSearchProvider(http_fetcher=http_fetcher)
     return FreeWebSearchProvider(http_fetcher=http_fetcher)
