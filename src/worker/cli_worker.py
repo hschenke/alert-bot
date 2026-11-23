@@ -9,6 +9,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 from src.config.settings import load_app_settings
+from src.detectors.diagnostics import format_diagnostics_one_liner
 from src.detectors.engine import AlertEvaluationEngine
 from src.domain.enums import CheckOutcome
 from src.notifications.channels import create_notification_router
@@ -85,8 +86,9 @@ def run_cli_worker(argv: list[str] | None = None) -> int:
                 error_count += 1
             summary_txt = result.finding.summary if result.finding else ""
             source_txt = result.finding.source_url if result.finding else ""
+            diag_txt = format_diagnostics_one_liner(result.diagnostics)
             logger.info(
-                "Regel '%s' (%s) -> %s (%s) [Query: '%s', URL: '%s', Source: '%s', Summary: '%s']",
+                "Regel '%s' (%s) -> %s (%s) [Query: '%s', URL: '%s', Source: '%s', Summary: '%s'%s]",
                 rule.title,
                 rule.id,
                 result.outcome.value,
@@ -95,7 +97,15 @@ def run_cli_worker(argv: list[str] | None = None) -> int:
                 rule.target_url,
                 source_txt,
                 summary_txt,
+                f", Diagnose: {diag_txt}" if diag_txt else "",
             )
+            if result.outcome == CheckOutcome.ERROR and result.diagnostics is not None:
+                if result.diagnostics.sample_sources:
+                    logger.info("  Quellen (%s): %s", rule.id, " | ".join(result.diagnostics.sample_sources))
+                if result.diagnostics.steps:
+                    logger.info("  Verlauf (%s): %s", rule.id, " -> ".join(result.diagnostics.steps))
+                if result.diagnostics.hint:
+                    logger.info("  Hinweis (%s): %s", rule.id, result.diagnostics.hint)
 
         logger.info(
             "Worker-Lauf beendet: %d geprüft, %d ausgelöst, %d Fehler.",

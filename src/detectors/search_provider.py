@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
-import datetime
-import email.utils
 import logging
+import threading
+import time
 import urllib.parse
-import xml.etree.ElementTree as ET
 from typing import Protocol
 
 import ai_brain
-from ai_brain import BrainError
-from bs4 import BeautifulSoup
+from ai_brain import BrainError, BrainTier
 
 from src.config.constants import MAX_DISCOVERED_ITEMS_PER_CHECK
+from src.detectors.diagnostics import SearchDiagnostics
+from src.detectors.free_search_parsers import (
+    parse_ddg_html,
+    parse_ddg_lite,
+    parse_google_news_rss,
+    parse_yahoo_html,
+)
 from src.detectors.http_client import SafeHttpFetcher
+from src.detectors.metric_grounding import is_low_signal_metric_source
 from src.domain.models import DiscoveredItem
 from src.security.sanitization import compute_item_fingerprint, sanitize_display_url
 
@@ -41,22 +47,32 @@ class WebSearchProvider(Protocol):
     def search(self, query: str, max_results: int = 10) -> list[DiscoveredItem]: ...
 
 
-def _extract_target_url(raw_href: str) -> str:
-    """Extrahiert die echte Zieladresse aus DuckDuckGo- (/l/?uddg=...) oder Yahoo-Redirects (/RU=...)."""
-    clean = (raw_href or "").strip()
-    if not clean:
-        return ""
-    if "uddg=" in clean:
-        parsed = urllib.parse.parse_qs(urllib.parse.urlparse(clean).query)
-        clean = parsed.get("uddg", [clean])[0]
-    elif "/RU=" in clean:
-        try:
-            target_part = clean.split("/RU=", 1)[1].split("/RK=", 1)[0]
-            clean = urllib.parse.unquote(target_part)
-        except Exception as exc:
-            logger.debug("Yahoo Redirect Unquote fehlgeschlagen: %s", exc)
-    safe = sanitize_display_url(clean)
-    return "" if safe == "#" else safe
+def _has_direct_web_hit(items: list[DiscoveredItem]) -> bool:
+    return any(not is_low_signal_metric_source(it) for it in items)
+
+
+def _merge_prioritizing_direct(
+    primary: list[DiscoveredItem],
+    secondary: list[DiscoveredItem],
+    limit: int,
+) -> list[DiscoveredItem]:
+    direct: list[DiscoveredItem] = []
+    low_sig: list[DiscoveredItem] = []
+    seen_fp: set[str] = set()
+    for it in [*primary, *secondary]:
+        if it.fingerprint in seen_fp:
+            continue
+        seen_fp.add(it.fingerprint)
+        (low_sig if is_low_signal_metric_source(it) else direct).append(it)
+    return [*direct, *low_sig][:limit]
+
+
+def _status_note(status_code: int) -> str:
+    if status_code in {202, 403, 429}:
+        return f"HTTP {status_code} (Anti-Bot)"
+    if status_code >= 400:
+        return f"HTTP {status_code}"
+    return "0 Treffer"
 
 
 class FreeWebSearchProvider:
@@ -64,16 +80,24 @@ class FreeWebSearchProvider:
 
     def __init__(self, http_fetcher: SafeHttpFetcher | None = None) -> None:
         self._http = http_fetcher or SafeHttpFetcher()
+        self._local = threading.local()
+
+    def get_last_search_diagnostics(self) -> SearchDiagnostics | None:
+        return getattr(self._local, "last_diag", None)
 
     def search(self, query: str, max_results: int = MAX_DISCOVERED_ITEMS_PER_CHECK) -> list[DiscoveredItem]:
         """Sucht prioritär über DuckDuckGo/Yahoo und ergänzt bei Bedarf frische Google News."""
         clean_query = query.strip()
         if not clean_query:
+            self._local.last_diag = None
             return []
 
+        started = time.monotonic()
         limit = max(1, min(max_results, MAX_DISCOVERED_ITEMS_PER_CHECK))
         results: list[DiscoveredItem] = []
         seen_fp: set[str] = set()
+        tools_exec: list[str] = []
+        tool_errs: list[str] = []
 
         def _add_items(items: list[DiscoveredItem]) -> None:
             for it in items:
@@ -81,144 +105,95 @@ class FreeWebSearchProvider:
                     seen_fp.add(it.fingerprint)
                     results.append(it)
 
-        # 1. DuckDuckGo HTML/Lite versuchen
-        _add_items(self._search_duckduckgo(clean_query, limit))
-
-        # 2. Falls DuckDuckGo keine Treffer liefert (z. B. auf AWS / Streamlit Cloud blockiert), Yahoo nutzen
+        _add_items(self._search_duckduckgo(clean_query, limit, tools_exec, tool_errs))
         if len(results) < 3:
-            _add_items(self._search_yahoo(clean_query, limit))
-
-        # 3. Google News mit strenger Zeitfilterung ergänzen
+            _add_items(self._search_yahoo(clean_query, limit, tools_exec, tool_errs))
         if len(results) < 3 or any(w in clean_query.lower() for w in ("news", "nachrichten", "aktuell", "bericht")):
-            _add_items(self._search_google_news(clean_query, limit))
+            _add_items(self._search_google_news(clean_query, limit, tools_exec, tool_errs))
 
-        return results[:limit]
+        final_items = results[:limit]
+        self._local.last_diag = SearchDiagnostics(
+            provider="free_web_search",
+            query=clean_query,
+            tools_executed=tuple(tools_exec),
+            tool_errors=tuple(tool_errs),
+            raw_count=len(final_items),
+            source_tools=tuple(dict.fromkeys(it.source_tool for it in final_items if it.source_tool)),
+            latency_ms=int((time.monotonic() - started) * 1000),
+        )
+        return final_items
 
-    def _search_duckduckgo(self, query: str, limit: int) -> list[DiscoveredItem]:
-        """Führt eine DuckDuckGo-HTML/Lite-Suche durch."""
+    def _search_duckduckgo(
+        self, query: str, limit: int, tools_exec: list[str], tool_errs: list[str]
+    ) -> list[DiscoveredItem]:
+        tools_exec.append("duckduckgo_html")
         try:
             get_url = f"{_DDG_HTML_ENDPOINT}?{urllib.parse.urlencode({'q': query})}"
             resp = self._http.fetch(get_url, headers=_BROWSER_HEADERS)
-            items = self._parse_ddg_html(resp.text, limit)
+            items = parse_ddg_html(resp.text, limit)
             if items:
                 return items
+            tool_errs.append(f"duckduckgo_html: {_status_note(resp.status_code)}")
         except Exception as exc:
+            tool_errs.append(f"duckduckgo_html: {str(exc)[:80]}")
             logger.debug("DuckDuckGo HTML-GET fehlgeschlagen (%s), teste Lite-POST...", exc)
 
+        tools_exec.append("duckduckgo_lite")
         try:
             resp_lite = self._http.post(_DDG_LITE_ENDPOINT, data={"q": query}, headers=_BROWSER_HEADERS)
-            return self._parse_ddg_lite(resp_lite.text, limit)
+            items_lite = parse_ddg_lite(resp_lite.text, limit)
+            if not items_lite:
+                tool_errs.append(f"duckduckgo_lite: {_status_note(resp_lite.status_code)}")
+            return items_lite
         except Exception as exc:
+            tool_errs.append(f"duckduckgo_lite: {str(exc)[:80]}")
             logger.warning("DuckDuckGo-Suche komplett fehlgeschlagen: %s", exc)
             return []
 
-    @staticmethod
-    def _parse_ddg_html(html_text: str, limit: int) -> list[DiscoveredItem]:
-        soup = BeautifulSoup(html_text or "", "html.parser")
-        items: list[DiscoveredItem] = []
-        for a_tag in soup.select("a.result__a")[:limit]:
-            title = a_tag.get_text(" ", strip=True)
-            url = _extract_target_url(a_tag.get("href", ""))
-            parent = a_tag.find_parent(class_="result") or a_tag.find_parent("div")
-            snippet = ""
-            if parent:
-                snip_node = parent.select_one(".result__snippet")
-                if snip_node:
-                    snippet = snip_node.get_text(" ", strip=True)[:280]
-            if title:
-                fp = compute_item_fingerprint(url, title)
-                items.append(DiscoveredItem(fingerprint=fp, title=title[:180], url=url, summary=snippet))
-        return items
-
-    @staticmethod
-    def _parse_ddg_lite(html_text: str, limit: int) -> list[DiscoveredItem]:
-        soup = BeautifulSoup(html_text or "", "html.parser")
-        links = soup.select(".result-link")
-        snippets = soup.select(".result-snippet")
-        items: list[DiscoveredItem] = []
-        for idx, a_tag in enumerate(links[:limit]):
-            title = a_tag.get_text(" ", strip=True)
-            url = _extract_target_url(a_tag.get("href", ""))
-            snippet = snippets[idx].get_text(" ", strip=True)[:280] if idx < len(snippets) else ""
-            if title:
-                fp = compute_item_fingerprint(url, title)
-                items.append(DiscoveredItem(fingerprint=fp, title=title[:180], url=url, summary=snippet))
-        return items
-
-    def _search_yahoo(self, query: str, limit: int) -> list[DiscoveredItem]:
-        """Führt eine Yahoo Web-Suche durch (funktioniert resilient auf Cloud-Servern)."""
+    def _search_yahoo(
+        self,
+        query: str,
+        limit: int,
+        tools_exec: list[str] | None = None,
+        tool_errs: list[str] | None = None,
+    ) -> list[DiscoveredItem]:
+        if tools_exec is not None:
+            tools_exec.append("yahoo_search")
         url = f"{_YAHOO_SEARCH_ENDPOINT}?{urllib.parse.urlencode({'p': query})}"
         try:
             resp = self._http.fetch(url, headers=_BROWSER_HEADERS)
-            return self._parse_yahoo_html(resp.text, limit)
+            items = parse_yahoo_html(resp.text, limit)
+            if not items and tool_errs is not None:
+                tool_errs.append(f"yahoo_search: {_status_note(resp.status_code)}")
+            return items
         except Exception as exc:
+            if tool_errs is not None:
+                tool_errs.append(f"yahoo_search: {str(exc)[:80]}")
             logger.debug("Yahoo Web-Suche fehlgeschlagen: %s", exc)
             return []
 
-    @staticmethod
-    def _parse_yahoo_html(html_text: str, limit: int) -> list[DiscoveredItem]:
-        soup = BeautifulSoup(html_text or "", "html.parser")
-        items: list[DiscoveredItem] = []
-        for res in soup.select("div.algo")[:limit]:
-            h3 = res.select_one("h3")
-            a_tag = h3.select_one("a") if h3 else None
-            if not a_tag:
-                continue
-            title = a_tag.get_text(" ", strip=True)
-            target_url = _extract_target_url(a_tag.get("href", ""))
-            comp = res.select_one(".compText, .compText p, .fc-falcon")
-            desc = comp.get_text(" ", strip=True)[:280] if comp else ""
-            if title:
-                fp = compute_item_fingerprint(target_url, title)
-                items.append(DiscoveredItem(fingerprint=fp, title=title[:180], url=target_url, summary=desc))
-        return items
-
-    def _search_google_news(self, query: str, limit: int) -> list[DiscoveredItem]:
-        """Sucht aktuelle Meldungen über den kostenfreien Google News RSS Feed (zeitlich gefiltert)."""
+    def _search_google_news(
+        self,
+        query: str,
+        limit: int,
+        tools_exec: list[str] | None = None,
+        tool_errs: list[str] | None = None,
+    ) -> list[DiscoveredItem]:
+        if tools_exec is not None:
+            tools_exec.append("google_news_rss")
         timed_query = query if "when:" in query else f"{query} when:180d"
         url = f"{_GOOGLE_NEWS_ENDPOINT}?{urllib.parse.urlencode({'q': timed_query, 'hl': 'de', 'gl': 'DE', 'ceid': 'DE:de'})}"
         try:
             resp = self._http.fetch(url, headers=_BROWSER_HEADERS)
-            return self._parse_google_news_rss(resp.text, limit)
+            items = parse_google_news_rss(resp.text, limit)
+            if not items and tool_errs is not None:
+                tool_errs.append(f"google_news_rss: {_status_note(resp.status_code)}")
+            return items
         except Exception as exc:
+            if tool_errs is not None:
+                tool_errs.append(f"google_news_rss: {str(exc)[:80]}")
             logger.debug("Google News RSS-Suche fehlgeschlagen: %s", exc)
             return []
-
-    @staticmethod
-    def _parse_google_news_rss(xml_text: str, limit: int) -> list[DiscoveredItem]:
-        if not xml_text or "<item>" not in xml_text:
-            return []
-        try:
-            root = ET.fromstring(xml_text)  # noqa: S314
-        except ET.ParseError:
-            return []
-
-        now = datetime.datetime.now(datetime.UTC)
-        max_age = datetime.timedelta(days=365)
-        items: list[DiscoveredItem] = []
-        for node in root.findall(".//item"):
-            if len(items) >= limit:
-                break
-            raw_date = (node.findtext("pubDate") or "").strip()
-            pub_year = ""
-            if raw_date:
-                try:
-                    dt = email.utils.parsedate_to_datetime(raw_date)
-                    if dt and (now - dt) > max_age:
-                        continue
-                    pub_year = f"{dt.year} " if dt else ""
-                except Exception as exc:
-                    logger.debug("Google News pubDate konnte nicht geparst werden: %s", exc)
-            title = (node.findtext("title") or "").strip()
-            raw_link = (node.findtext("link") or "").strip()
-            safe_link = sanitize_display_url(raw_link)
-            url = "" if safe_link == "#" else safe_link
-            raw_desc = BeautifulSoup((node.findtext("description") or ""), "html.parser").get_text(" ", strip=True)
-            desc = f"[{pub_year.strip()}] {raw_desc}"[:280] if pub_year else raw_desc[:280]
-            if title:
-                fp = compute_item_fingerprint(url, title)
-                items.append(DiscoveredItem(fingerprint=fp, title=title[:180], url=url, summary=desc))
-        return items
 
 
 def _map_brain_citation(citation: object) -> DiscoveredItem | None:
@@ -230,8 +205,23 @@ def _map_brain_citation(citation: object) -> DiscoveredItem | None:
     if not title:
         return None
     snippet = str(getattr(citation, "snippet", "") or "").strip()[:280]
+    source_tool = str(getattr(citation, "source_tool", "") or "").strip()[:60]
     fp = compute_item_fingerprint(url, title)
-    return DiscoveredItem(fingerprint=fp, title=title, url=url, summary=snippet)
+    return DiscoveredItem(fp, title, url, snippet, source_tool=source_tool)
+
+
+def _format_brain_tool_errors(search_res: object) -> list[str]:
+    raw_errors = getattr(search_res, "tool_errors", None) or {}
+    errors = [f"{tid}: {str(msg)[:90]}" for tid, msg in raw_errors.items()]
+    executed = list(getattr(search_res, "tools_executed", None) or [])
+    hit_tools = {
+        str(getattr(c, "source_tool", "") or "").strip()
+        for c in (getattr(search_res, "citations", None) or [])
+    }
+    for tid in executed:
+        if tid not in raw_errors and tid not in hit_tools:
+            errors.append(f"{tid}: 0 Treffer")
+    return errors
 
 
 class BrainWebSearchProvider:
@@ -243,38 +233,126 @@ class BrainWebSearchProvider:
         fallback_provider: WebSearchProvider | None = None,
     ) -> None:
         self._fallback = fallback_provider or FreeWebSearchProvider(http_fetcher)
+        self._local = threading.local()
+
+    def get_last_search_diagnostics(self) -> SearchDiagnostics | None:
+        return getattr(self._local, "last_diag", None)
 
     def search(
-        self,
-        query: str,
-        max_results: int = MAX_DISCOVERED_ITEMS_PER_CHECK,
+        self, query: str, max_results: int = MAX_DISCOVERED_ITEMS_PER_CHECK
     ) -> list[DiscoveredItem]:
-        """Führt eine `ai_brain`-Suche gemäß App-Policy aus und fällt bei `BrainError` zurück."""
+        """Führt `ai_brain`-Suche gemäß App-Policy aus und ergänzt bei Fehler/Low-Signal via Free-Fallback."""
         clean_query = query.strip()
         if not clean_query:
+            self._local.last_diag = None
             return []
-
         limit = max(1, min(max_results, MAX_DISCOVERED_ITEMS_PER_CHECK))
         try:
             with ai_brain.connect() as brain:
-                search_res = brain.search(
-                    clean_query,
-                    tier="auto",
-                    max_results=limit,
-                    allow_paid=None,
-                )
+                search_res = brain.search(clean_query, tier="auto", max_results=limit, allow_paid=None)
         except BrainError as exc:
             logger.warning("AI-Brain Websuche fehlgeschlagen (%s) – nutze FreeWebSearchProvider.", exc)
-            return self._fallback.search(clean_query, max_results=limit)
+            return self._fallback_with_diag(clean_query, limit, f"ai_brain: {exc}")
+        return self._process_brain_result(clean_query, search_res, limit)
 
+    def search_escalated(
+        self, query: str, max_results: int = MAX_DISCOVERED_ITEMS_PER_CHECK
+    ) -> list[DiscoveredItem]:
+        """Eskaliert bei leerer/schwacher Erstsuche gezielt auf das nächsthöhere Tier (Policy-Budget bleibt gewahrt)."""
+        clean_query = query.strip()
+        if not clean_query:
+            return []
+        limit = max(1, min(max_results, MAX_DISCOVERED_ITEMS_PER_CHECK))
+        next_tier = BrainTier.STANDARD
+        try:
+            with ai_brain.connect() as brain:
+                policy = brain.get_app_policy()
+                next_tier = BrainTier.STANDARD if policy.search_tier == BrainTier.FAST else BrainTier.DEEP
+                search_res = brain.search(
+                    clean_query, tier=next_tier, max_results=limit, allow_paid=bool(policy.allow_paid)
+                )
+        except BrainError as exc:
+            logger.warning("AI-Brain Eskalation (%s) fehlgeschlagen (%s) – nutze Free-Fallback.", next_tier.value, exc)
+            return self._fallback_with_diag(clean_query, limit, f"ai_brain ({next_tier.value}): {exc}")
+        return self._process_brain_result(clean_query, search_res, limit)
+
+    def fetch_page_fallback(self, url: str) -> tuple[str, str, str] | None:
+        """Lädt blockierte/JS-lastige Seiten über `ai_brain.fetch_page` (inkl. Jina Reader, 0 €-Policy)."""
+        try:
+            with ai_brain.connect() as brain:
+                policy = brain.get_app_policy()
+                page = brain.fetch_page(url, allow_paid=bool(policy.allow_paid))
+                if page.text_content.strip():
+                    return page.url, page.text_content, page.extractor_used or "ai_brain_fetch"
+        except Exception as exc:
+            logger.debug("AI-Brain fetch_page Fallback fehlgeschlagen (%s): %s", url, exc)
+        return None
+
+    def _process_brain_result(
+        self, clean_query: str, search_res: object, limit: int
+    ) -> list[DiscoveredItem]:
         items: list[DiscoveredItem] = []
         seen_fp: set[str] = set()
-        for citation in search_res.citations:
+        for citation in getattr(search_res, "citations", None) or []:
             mapped = _map_brain_citation(citation)
             if mapped is not None and mapped.fingerprint not in seen_fp:
                 seen_fp.add(mapped.fingerprint)
                 items.append(mapped)
-        return items[:limit]
+
+        tier_obj = getattr(search_res, "tier", None)
+        tier_label = tier_obj.value if hasattr(tier_obj, "value") else str(tier_obj or "auto")
+        tools_exec = list(getattr(search_res, "tools_executed", None) or [])
+        tool_errors = _format_brain_tool_errors(search_res)
+        latency_ms = int(getattr(search_res, "latency_ms", 0) or 0)
+        fallback_used = False
+
+        logger.info(
+            "AI-Brain Websuche '%s' (tier=%s, %d ms): %d Treffer, Tools=%s%s",
+            clean_query, tier_label, latency_ms, len(items), tools_exec or ["(keine)"],
+            f", Engpässe={tool_errors}" if tool_errors else "",
+        )
+
+        if not items or not _has_direct_web_hit(items):
+            logger.info(
+                "AI-Brain (%s) lieferte %d Treffer ohne direkte Web-SERP-Quellen – ergänze via FreeWebSearchProvider.",
+                tier_label, len(items),
+            )
+            fb_items = self._fallback.search(clean_query, max_results=limit)
+            fallback_used = True
+            items = _merge_prioritizing_direct(fb_items, items, limit)
+            fb_diag = getattr(self._fallback, "get_last_search_diagnostics", lambda: None)()
+            if fb_diag is not None:
+                tools_exec.extend(t for t in fb_diag.tools_executed if t not in tools_exec)
+                tool_errors.extend(e for e in fb_diag.tool_errors if e not in tool_errors)
+
+        final_items = items[:limit]
+        self._local.last_diag = SearchDiagnostics(
+            provider="ai_brain+free" if fallback_used else "ai_brain",
+            tier=tier_label,
+            query=clean_query,
+            tools_executed=tuple(tools_exec),
+            tool_errors=tuple(tool_errors),
+            raw_count=len(final_items),
+            source_tools=tuple(dict.fromkeys(it.source_tool for it in final_items if it.source_tool)),
+            fallback_used=fallback_used,
+            latency_ms=latency_ms,
+        )
+        return final_items
+
+    def _fallback_with_diag(self, query: str, limit: int, brain_err: str) -> list[DiscoveredItem]:
+        fb_items = self._fallback.search(query, max_results=limit)
+        fb_diag = getattr(self._fallback, "get_last_search_diagnostics", lambda: None)()
+        self._local.last_diag = SearchDiagnostics(
+            provider="free_web_search (Fallback)",
+            query=query,
+            tools_executed=fb_diag.tools_executed if fb_diag else (),
+            tool_errors=(brain_err[:120], *(fb_diag.tool_errors if fb_diag else ())),
+            raw_count=len(fb_items),
+            source_tools=tuple(dict.fromkeys(it.source_tool for it in fb_items if it.source_tool)),
+            fallback_used=True,
+            latency_ms=fb_diag.latency_ms if fb_diag else 0,
+        )
+        return fb_items
 
 
 def create_web_search_provider(

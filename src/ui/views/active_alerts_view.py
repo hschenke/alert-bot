@@ -8,6 +8,7 @@ from dataclasses import replace
 import streamlit as st
 
 from src.config.constants import INTERVAL_PRESETS_MINUTES
+from src.detectors.diagnostics import deserialize_diagnostics, format_diagnostics_one_liner
 from src.detectors.rule_compiler import utc_now_iso
 from src.domain.enums import AuthRole, CheckOutcome, RuleStatus
 from src.domain.models import AlertRule, CheckLogEntry
@@ -23,6 +24,10 @@ from src.ui.formatters import (
     build_rule_info_html,
     format_interval_label,
     format_iso_timestamp,
+)
+from src.ui.views.diagnostics_panel import (
+    render_check_log_diagnostics,
+    render_last_error_diagnostics,
 )
 from src.ui.views.rule_editor_form import render_rule_editor_panel
 from src.worker.dispatcher import AlertWorkDispatcher
@@ -102,7 +107,7 @@ def _render_single_rule_card(
         is_confirming_delete or is_editing,
     ):
         _render_rule_header(rule)
-        _render_rule_details(rule)
+        _render_rule_details(rule, logs)
         if role == AuthRole.ADMIN:
             _render_admin_controls(rule, repository, dispatcher, is_confirming_delete, is_editing)
         _render_check_logs(rule.id, logs)
@@ -124,7 +129,7 @@ def _render_rule_header(rule: AlertRule) -> None:
             st.caption("Pending")
 
 
-def _render_rule_details(rule: AlertRule) -> None:
+def _render_rule_details(rule: AlertRule, logs: list[CheckLogEntry]) -> None:
     user_text = rule.condition_description or rule.user_prompt
     if user_text:
         st.markdown(
@@ -142,8 +147,7 @@ def _render_rule_details(rule: AlertRule) -> None:
         f":material/notifications: Triggers: **{rule.total_triggers}**",
         help="Zählt ausgelöste Alerts. Die erste Baseline-Messung dient als Referenz und löst noch keinen Alarm aus.",
     )
-    if rule.last_error:
-        st.warning(f"Last Error: {rule.last_error}")
+    render_last_error_diagnostics(rule, logs)
 
 
 def _render_admin_controls(
@@ -247,9 +251,22 @@ def _render_check_logs(rule_id: str, logs: list[CheckLogEntry]) -> None:
         if not logs:
             st.caption("No check logs yet.")
             return
+        has_details = any(bool(log.details_json) for log in logs)
+        show_details = (
+            st.checkbox("🔎 Show detailed diagnostic trace", value=False, key=f"diag_trace_{rule_id}")
+            if has_details
+            else False
+        )
         for log in logs:
             val_part = f" · `{log.measured_display}`" if log.measured_display else ""
             st.markdown(
                 f"- `{format_iso_timestamp(log.created_at)}` — "
                 f"**{OUTCOME_BADGES[log.outcome]}**{val_part} ({log.duration_ms} ms): {log.message}"
             )
+            diag = deserialize_diagnostics(log.details_json) if log.details_json else None
+            if diag is not None:
+                one_liner = format_diagnostics_one_liner(diag)
+                if one_liner:
+                    st.caption(f"↳ {one_liner}")
+                if show_details:
+                    render_check_log_diagnostics(diag)

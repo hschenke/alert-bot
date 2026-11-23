@@ -39,6 +39,15 @@ class SqlAlertRepository:
     def initialize_schema(self) -> None:
         """Führt alle DDL-Migrationen idempotent aus."""
         self._executor.execute_batch([(ddl, ()) for ddl in DDL_STATEMENTS])
+        self._ensure_check_logs_details_column()
+
+    def _ensure_check_logs_details_column(self) -> None:
+        res = self._executor.execute("PRAGMA table_info(alert_check_logs)")
+        cols = {str(row.get("name") or "") for row in res.rows}
+        if "details_json" not in cols:
+            self._executor.execute(
+                "ALTER TABLE alert_check_logs ADD COLUMN details_json TEXT NOT NULL DEFAULT ''"
+            )
 
     def upsert_rule(self, rule: AlertRule) -> None:
         """Erstellt oder aktualisiert eine Alert-Regel vollständig parametrisiert."""
@@ -299,8 +308,8 @@ class SqlAlertRepository:
                 (
                     """
                     INSERT INTO alert_check_logs
-                    (id, rule_id, outcome, message, measured_display, duration_ms, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, rule_id, outcome, message, measured_display, duration_ms, created_at, details_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         entry.id,
@@ -310,6 +319,7 @@ class SqlAlertRepository:
                         entry.measured_display[:120],
                         entry.duration_ms,
                         entry.created_at,
+                        entry.details_json[:4000],
                     ),
                 ),
                 (
@@ -345,9 +355,9 @@ class SqlAlertRepository:
         """Lädt bis zu `per_rule_limit` aktuelle Prüf-Logs je Regel in einer einzigen Abfrage."""
         res = self._executor.execute(
             """
-            SELECT id, rule_id, outcome, message, measured_display, duration_ms, created_at
+            SELECT id, rule_id, outcome, message, measured_display, duration_ms, created_at, details_json
             FROM (
-                SELECT id, rule_id, outcome, message, measured_display, duration_ms, created_at,
+                SELECT id, rule_id, outcome, message, measured_display, duration_ms, created_at, details_json,
                        ROW_NUMBER() OVER (PARTITION BY rule_id ORDER BY created_at DESC) AS rn
                 FROM alert_check_logs
             )

@@ -24,6 +24,25 @@ class DiscoveredItem:
     url: str = ""
     summary: str = ""
     price_or_value: str = ""
+    source_tool: str = ""
+
+
+@dataclass(frozen=True)
+class CheckDiagnostics:
+    """Strukturierte Diagnose-Informationen eines Prüf-Laufs für UI, Worker-Logs & Fehlersuche."""
+
+    stage: str = ""
+    provider: str = ""
+    query: str = ""
+    tools_used: tuple[str, ...] = ()
+    tool_errors: tuple[str, ...] = ()
+    raw_hits: int = 0
+    relevant_hits: int = 0
+    sample_sources: tuple[str, ...] = ()
+    llm_status: str = ""
+    pages_checked: tuple[str, ...] = ()
+    steps: tuple[str, ...] = ()
+    hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -85,6 +104,7 @@ class DetectorFinding:
     content_hash: str = ""
     items: tuple[DiscoveredItem, ...] = ()
     source_url: str = ""
+    diagnostics: CheckDiagnostics | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +136,7 @@ class CheckLogEntry:
     measured_display: str = ""
     duration_ms: int = 0
     created_at: str = ""
+    details_json: str = ""
 
 
 @dataclass(frozen=True)
@@ -127,3 +148,4 @@ class EvaluationOutcome:
     finding: DetectorFinding | None = None
     event: AlertEvent | None = None
     error_message: str = ""
+    diagnostics: CheckDiagnostics | None = None

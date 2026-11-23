@@ -14,6 +14,7 @@ from src.detectors.comparators import (
     format_number_de,
     parse_localized_float,
 )
+from src.detectors.diagnostics import CheckTraceBuilder, format_source_label
 from src.detectors.http_client import SafeHttpFetcher
 from src.detectors.llm_gateway import AlertLLMGateway
 from src.detectors.search_provider import FreeWebSearchProvider, WebSearchProvider
@@ -124,6 +125,7 @@ class WeatherThresholdDetector:
         api_field, unit, label = _METRIC_API_FIELDS[metric]
         target = rule.threshold.target_value
         op = rule.threshold.operator
+        trace = CheckTraceBuilder(stage="weather_api", query=location)
 
         measured, resolved_place, source_url = self._resolve_live_measurement(
             location=location,
@@ -131,6 +133,7 @@ class WeatherThresholdDetector:
             api_field=api_field,
             label=label,
             unit=unit,
+            trace=trace,
         )
 
         met = evaluate_numeric_operator(measured, op, target)
@@ -147,6 +150,7 @@ class WeatherThresholdDetector:
             measured_value=measured,
             measured_display=f"{measured_str} ({resolved_place})",
             source_url=source_url,
+            diagnostics=trace.build(),
         )
 
     def _resolve_live_measurement(
@@ -156,25 +160,29 @@ class WeatherThresholdDetector:
         api_field: str,
         label: str,
         unit: str,
+        trace: CheckTraceBuilder,
     ) -> tuple[float, str, str]:
-        coords = self._try_geocode(location)
+        coords = self._try_geocode(location, trace)
         resolved_place = coords[2] if coords else location
 
         if coords is not None:
             lat, lon, resolved_place = coords
-            om_val = self._try_open_meteo_current(lat, lon, api_field, metric)
+            om_val = self._try_open_meteo_current(lat, lon, api_field, metric, trace)
             if om_val is not None:
+                trace.provider = "open_meteo"
                 return om_val, resolved_place, "https://open-meteo.com/"
 
-            dwd_val = self._try_bright_sky_current(lat, lon, metric)
+            dwd_val = self._try_bright_sky_current(lat, lon, metric, trace)
             if dwd_val is not None:
+                trace.provider = "bright_sky_dwd"
                 return dwd_val, resolved_place, "https://brightsky.dev/"
 
-        wttr_val = self._try_wttr_current(location, metric)
+        wttr_val = self._try_wttr_current(location, metric, trace)
         if wttr_val is not None:
+            trace.provider = "wttr.in"
             return wttr_val, resolved_place, "https://wttr.in/"
 
-        return self._fetch_via_web_search_fallback(resolved_place, metric, label, unit)
+        return self._fetch_via_web_search_fallback(resolved_place, metric, label, unit, trace)
 
     def _fetch_json_resilient(self, url: str, attempts: int = WEATHER_API_RETRIES) -> dict[str, Any]:
         last_exc: Exception | None = None
@@ -199,12 +207,14 @@ class WeatherThresholdDetector:
                 time.sleep(RETRY_BACKOFF_BASE_SECONDS * (attempt + 1))
         raise DetectorExecutionError(f"Wetter-API nicht erreichbar: {last_exc}") from last_exc
 
-    def _try_geocode(self, location: str) -> tuple[float, float, str] | None:
+    def _try_geocode(self, location: str, trace: CheckTraceBuilder) -> tuple[float, float, str] | None:
+        trace.add_tool("open_meteo_geocoding")
         geo_url = f"{_GEOCODING_URL}?name={quote(location)}&count=1&language=de&format=json"
         try:
             geo_data = self._fetch_json_resilient(geo_url)
             results = geo_data.get("results")
             if not isinstance(results, list) or not results or not isinstance(results[0], dict):
+                trace.add_tool_error("open_meteo_geocoding: Ort nicht gefunden")
                 return None
             first = results[0]
             lat, lon = float(first["latitude"]), float(first["longitude"])
@@ -212,43 +222,57 @@ class WeatherThresholdDetector:
             country = str(first.get("country", "")).strip()
             return lat, lon, f"{city}, {country}" if country else city
         except (DetectorExecutionError, KeyError, TypeError, ValueError) as exc:
+            trace.add_tool_error(f"open_meteo_geocoding: {str(exc)[:80]}")
             logger.warning("Open-Meteo Geocoding fehlgeschlagen (%s).", exc)
             return None
 
     def _try_open_meteo_current(
-        self, lat: float, lon: float, api_field: str, metric: WeatherMetric
+        self, lat: float, lon: float, api_field: str, metric: WeatherMetric, trace: CheckTraceBuilder
     ) -> float | None:
+        trace.add_tool("open_meteo")
         wx_url = f"{_FORECAST_URL}?latitude={lat}&longitude={lon}&current={api_field}&timezone=auto"
         try:
             wx_data = self._fetch_json_resilient(wx_url)
             current = wx_data.get("current")
             val = _first_numeric_field(current, (api_field,)) if isinstance(current, dict) else None
             if val is not None and _is_plausible_weather_value(metric, val):
+                trace.add_step(f"Open-Meteo erfolgreich: {val}")
                 return val
+            trace.add_tool_error("open_meteo: kein plausibler Messwert")
         except DetectorExecutionError as exc:
+            trace.add_tool_error(f"open_meteo: {str(exc)[:80]}")
             logger.warning("Open-Meteo nicht verfügbar (%s) – nutze DWD/Bright-Sky & Wetter-Fallback.", exc)
         return None
 
-    def _try_bright_sky_current(self, lat: float, lon: float, metric: WeatherMetric) -> float | None:
+    def _try_bright_sky_current(
+        self, lat: float, lon: float, metric: WeatherMetric, trace: CheckTraceBuilder
+    ) -> float | None:
         fields = _BRIGHT_SKY_FIELDS.get(metric)
         if not fields:
             return None
+        trace.add_tool("bright_sky_dwd")
         url = f"{_BRIGHT_SKY_URL}?lat={lat:.4f}&lon={lon:.4f}&units=dwd"
         try:
             data = self._fetch_json_resilient(url, attempts=1)
             weather = data.get("weather")
             val = _first_numeric_field(weather, fields) if isinstance(weather, dict) else None
             if val is not None and _is_plausible_weather_value(metric, val):
+                trace.add_step(f"DWD Bright Sky erfolgreich: {val}")
                 logger.info("DWD Bright Sky Fallback erfolgreich: %s", val)
                 return val
+            trace.add_tool_error("bright_sky_dwd: kein Messwert")
         except DetectorExecutionError as exc:
+            trace.add_tool_error(f"bright_sky_dwd: {str(exc)[:80]}")
             logger.info("Bright Sky (DWD) nicht verfügbar (%s).", exc)
         return None
 
-    def _try_wttr_current(self, location: str, metric: WeatherMetric) -> float | None:
+    def _try_wttr_current(
+        self, location: str, metric: WeatherMetric, trace: CheckTraceBuilder
+    ) -> float | None:
         field_name = _WTTR_FIELDS.get(metric)
         if not field_name:
             return None
+        trace.add_tool("wttr.in")
         url = f"{_WTTR_URL}/{quote(location)}?format=j2"
         try:
             data = self._fetch_json_resilient(url, attempts=1)
@@ -256,9 +280,12 @@ class WeatherThresholdDetector:
             first = conds[0] if isinstance(conds, list) and conds and isinstance(conds[0], dict) else None
             val = _first_numeric_field(first, (field_name,)) if first else None
             if val is not None and _is_plausible_weather_value(metric, val):
+                trace.add_step(f"wttr.in erfolgreich: {val}")
                 logger.info("wttr.in Wetter-Fallback erfolgreich: %s", val)
                 return val
+            trace.add_tool_error("wttr.in: kein Messwert")
         except DetectorExecutionError as exc:
+            trace.add_tool_error(f"wttr.in: {str(exc)[:80]}")
             logger.info("wttr.in Wetter-Fallback nicht verfügbar (%s).", exc)
         return None
 
@@ -268,13 +295,25 @@ class WeatherThresholdDetector:
         metric: WeatherMetric,
         label: str,
         unit: str,
+        trace: CheckTraceBuilder,
     ) -> tuple[float, str, str]:
+        trace.stage = "weather_web_fallback"
         query = f"Wetter {location} {label} aktuell heute"
         raw_hits = self._search_provider.search(query)
+        getter = getattr(self._search_provider, "get_last_search_diagnostics", None)
+        trace.merge_search(getter() if callable(getter) else None)
+        trace.raw_hits = len(raw_hits)
         live_hits = [hit for hit in raw_hits if _is_live_weather_hit(hit)]
+        trace.relevant_hits = len(live_hits)
+        for item in (live_hits[:3] or raw_hits[:3]):
+            trace.add_source(format_source_label(item))
+
         if not live_hits:
+            trace.hint = "Wetter-APIs vorübergehend gestört und Web-Fallback fand nur historische/Statistik-Seiten. Ortsnamen prüfen."
             raise DetectorExecutionError(
-                f"Keine aktuellen Live-Wetterdaten für '{location}' ermittelbar."
+                f"Keine aktuellen Live-Wetterdaten für '{location}' ermittelbar "
+                f"({len(raw_hits)} Web-Treffer, 0 Live-Wetterquellen).",
+                diagnostics=trace.build(),
             )
 
         primary_url = live_hits[0].url or "https://open-meteo.com/"
@@ -297,12 +336,20 @@ class WeatherThresholdDetector:
                 if res.value_found and res.numeric_value is not None:
                     val = float(res.numeric_value)
                     if _is_plausible_weather_value(metric, val):
+                        trace.llm_status = f"ok ({val})"
                         return val, location, res.source_url or primary_url
+                trace.llm_status = "kein Live-Wert in Snippets"
             except Exception as exc:
+                trace.llm_status = f"Fehler ({type(exc).__name__})"
                 logger.warning("KI-Wetterextraktion fehlgeschlagen (%s), nutze Heuristik: %s", type(exc).__name__, exc)
 
         parsed = parse_localized_float(snippets, unit, strict_unit=True)
         if parsed is not None and _is_plausible_weather_value(metric, parsed):
+            trace.add_step(f"Web-Fallback heuristisch: {parsed} {unit}")
             return parsed, location, primary_url
 
-        raise DetectorExecutionError(f"Kein aktueller Wetterwert für '{location}' ermittelbar.")
+        trace.hint = "Alle Wetter-APIs und Web-Snippets lieferten keinen Live-Messwert. Ortsnamen unter Edit prüfen."
+        raise DetectorExecutionError(
+            f"Kein aktueller Wetterwert für '{location}' ermittelbar (APIs & Web-Fallback ohne Live-Wert).",
+            diagnostics=trace.build(),
+        )

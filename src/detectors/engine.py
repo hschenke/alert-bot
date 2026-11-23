@@ -11,6 +11,7 @@ from typing import Protocol
 
 from src.config.constants import MAX_CONSECUTIVE_FAILURES_BEFORE_ERROR
 from src.config.settings import AppSettings
+from src.detectors.diagnostics import format_diagnostics_one_liner, serialize_diagnostics
 from src.detectors.http_api_detector import HttpApiDetector
 from src.detectors.http_client import SafeHttpFetcher
 from src.detectors.llm_gateway import AlertLLMGateway, create_alert_llm_gateway
@@ -27,10 +28,11 @@ from src.domain.enums import (
     RuleStatus,
     TriggerMode,
 )
-from src.domain.exceptions import AlertBotError
+from src.domain.exceptions import AlertBotError, DetectorExecutionError
 from src.domain.models import (
     AlertEvent,
     AlertRule,
+    CheckDiagnostics,
     CheckLogEntry,
     DetectorFinding,
     DiscoveredItem,
@@ -149,7 +151,8 @@ class AlertEvaluationEngine:
             )
         except (AlertBotError, ValueError) as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
-            return self._finalize_error(rule, str(exc), now_iso, next_iso, duration_ms)
+            diag = exc.diagnostics if isinstance(exc, DetectorExecutionError) else None
+            return self._finalize_error(rule, str(exc), now_iso, next_iso, duration_ms, diagnostics=diag)
         finally:
             self._repo.release_rule_lock(rule.id)
 
@@ -288,9 +291,16 @@ class AlertEvaluationEngine:
                 measured_display=finding.measured_display,
                 duration_ms=duration_ms,
                 created_at=now_iso,
+                details_json=serialize_diagnostics(finding.diagnostics),
             )
         )
-        return EvaluationOutcome(rule=updated_rule, outcome=outcome, finding=finding, event=event)
+        return EvaluationOutcome(
+            rule=updated_rule,
+            outcome=outcome,
+            finding=finding,
+            event=event,
+            diagnostics=finding.diagnostics,
+        )
 
     def _build_and_send_event(
         self,
@@ -331,6 +341,7 @@ class AlertEvaluationEngine:
         now_iso: str,
         next_iso: str,
         duration_ms: int,
+        diagnostics: CheckDiagnostics | None = None,
     ) -> EvaluationOutcome:
         failures = rule.consecutive_failures + 1
         status = (
@@ -343,7 +354,7 @@ class AlertEvaluationEngine:
             status=status,
             last_checked_at=now_iso,
             next_check_at=next_iso,
-            last_error=error_msg[:300],
+            last_error=error_msg[:500],
             consecutive_failures=failures,
             updated_at=now_iso,
         )
@@ -356,11 +367,20 @@ class AlertEvaluationEngine:
                 message=error_msg,
                 duration_ms=duration_ms,
                 created_at=now_iso,
+                details_json=serialize_diagnostics(diagnostics),
             )
         )
-        logger.warning("Prüfung für Regel '%s' fehlgeschlagen (%d): %s", rule.id, failures, error_msg)
+        diag_summary = format_diagnostics_one_liner(diagnostics)
+        logger.warning(
+            "Prüfung für Regel '%s' fehlgeschlagen (%d): %s%s",
+            rule.id,
+            failures,
+            error_msg,
+            f" | {diag_summary}" if diag_summary else "",
+        )
         return EvaluationOutcome(
             rule=updated_rule,
             outcome=CheckOutcome.ERROR,
             error_message=error_msg,
+            diagnostics=diagnostics,
         )

@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.domain.models import CheckDiagnostics
+
 
 class AlertBotError(Exception):
     """Basisklasse für alle fachlichen und technischen Fehler im Alert-Bot."""
@@ -29,6 +34,15 @@ class LLMProviderError(AlertBotError):
 
 class DetectorExecutionError(AlertBotError):
     """Fehler während der Ausführung eines spezifischen Alert-Wächters."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        diagnostics: CheckDiagnostics | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics
 
 
 class NotificationError(AlertBotError):

@@ -1,9 +1,10 @@
-"""Relevanz-Filter, Plausibilitäts- & Grounding-Prüfung für numerische Web-Extraktion."""
+"""Relevanz-Filter, Query-Relaxation, Seiten-Fokussierung & Grounding-Prüfung für Kennzahlen."""
 
 from __future__ import annotations
 
 import math
 import re
+from urllib.parse import urlparse
 
 from src.detectors.comparators import (
     extract_all_unit_values,
@@ -22,7 +23,27 @@ _GENERIC_QUERY_WORDS: frozenset[str] = frozenset(
         "aus", "im", "in", "an", "ab", "bis", "über", "ueber", "unter",
     }
 )
+_RELAX_STRIP_WORDS: frozenset[str] = frozenset(
+    {"aktuell", "aktuelle", "aktueller", "aktuelles", "derzeit", "heute", "jetzt", "überwachen", "ueberwachen"}
+)
+LOW_SIGNAL_METRIC_TOOLS: frozenset[str] = frozenset(
+    {
+        "google_news_rss",
+        "wikipedia_api",
+        "wikidata_api",
+        "arxiv_api",
+        "hackernews_algolia",
+        "tagesschau_rss",
+    }
+)
+LOW_SIGNAL_METRIC_HOSTS: tuple[str, ...] = (
+    "news.google.com",
+    "wikipedia.org",
+    "wikidata.org",
+    "arxiv.org",
+)
 _WORD_RE = re.compile(r"[a-zäöüß0-9]{3,}", re.IGNORECASE)
+_DIGIT_RE = re.compile(r"\d")
 
 
 def extract_query_terms(query: str) -> list[str]:
@@ -56,20 +77,105 @@ def is_percent_unit(unit: str) -> bool:
     return unit.strip().lower() in {"%", "prozent", "pct"}
 
 
-def rank_relevant_hits(search_hits: list[DiscoveredItem], query: str) -> list[tuple[DiscoveredItem, int]]:
-    """Filtert und sortiert Suchtreffer anhand ihrer Titel-/Snippet-Relevanz zur Anfrage."""
+def is_low_signal_metric_source(hit: DiscoveredItem) -> bool:
+    """Erkennt News-Redirector- und Enzyklopädie-Quellen, die selten Live-Kennzahlen im Snippet tragen."""
+    if hit.source_tool.strip().lower() in LOW_SIGNAL_METRIC_TOOLS:
+        return True
+    host = (urlparse(hit.url).hostname or "").lower()
+    return any(blocked in host for blocked in LOW_SIGNAL_METRIC_HOSTS)
+
+
+def build_relaxed_metric_query(query: str) -> str:
+    """Erzeugt eine prägnantere Fallback-Suchanfrage ohne Füllwörter/überlange Wortendungen."""
+    clean = " ".join((query or "").split())
+    if not clean:
+        return ""
+    tokens: list[str] = []
+    for raw in clean.split():
+        low = raw.lower().strip(",.;:!?")
+        if low in _RELAX_STRIP_WORDS:
+            continue
+        if len(low) >= 15 and low.endswith("ssatz"):
+            tokens.append(raw[:-5])
+        else:
+            tokens.append(raw)
+    relaxed = " ".join(tokens).strip()
+    if not relaxed or relaxed.lower() == clean.lower():
+        return ""
+    return relaxed
+
+
+def rank_relevant_hits(
+    search_hits: list[DiscoveredItem],
+    query: str,
+    explicit_unit: str = "",
+) -> list[tuple[DiscoveredItem, int]]:
+    """Filtert und priorisiert Suchtreffer (direkte Webseiten vor News/Wikipedia, inkl. URL-Terms)."""
     terms = extract_query_terms(query)
     min_required = 1 if len(terms) <= 2 else 2
-    scored: list[tuple[int, int, int, DiscoveredItem]] = []
+    scored: list[tuple[int, int, int, int, int, DiscoveredItem]] = []
     for idx, hit in enumerate(search_hits):
-        hit_text = f"{hit.title} — {hit.summary}".strip(" —").lower()
-        term_hits = count_term_matches(hit_text, terms)
-        if terms and term_hits < min_required:
+        text_no_url = f"{hit.title} — {hit.summary}".strip(" —")
+        searchable = f"{text_no_url} {hit.url}".lower()
+        term_hits = count_term_matches(searchable, terms)
+        is_ai_grounding = hit.source_tool.strip().lower() == "gemini_google_search" and bool(hit.url)
+        if terms and term_hits < min_required and not is_ai_grounding:
             continue
-        has_recency = int(any(w in hit_text for w in ("aktuell", "derzeit", "2026", "2027")))
-        scored.append((term_hits, has_recency, -idx, hit))
+        is_direct = int(not is_low_signal_metric_source(hit))
+        unit_hint = explicit_unit or infer_unit_from_text(text_no_url)
+        has_unit_val = int(bool(unit_hint and extract_all_unit_values(text_no_url, unit_hint)))
+        has_recency = int(any(w in text_no_url.lower() for w in ("aktuell", "derzeit", "2026", "2027")))
+        effective_hits = max(term_hits, 1) if is_ai_grounding else term_hits
+        scored.append((is_direct, effective_hits, has_unit_val, has_recency, -idx, hit))
     scored.sort(reverse=True)
-    return [(hit, term_hits) for term_hits, _rec, _neg_idx, hit in scored]
+    return [(hit, term_hits) for _dir, term_hits, _uv, _rec, _neg, hit in scored]
+
+
+def extract_focused_page_excerpt(page_text: str, query: str, max_chars: int = 6000) -> str:
+    """Kombiniert Seitenanfang mit Schlüsselwort-Fenstern, damit Tabellen weiter unten nicht abgeschnitten werden."""
+    if len(page_text) <= max_chars:
+        return page_text
+
+    head_len = min(2200, max_chars // 2)
+    terms = extract_query_terms(query)
+    if not terms:
+        return page_text[:max_chars]
+
+    lower = page_text.lower()
+    stems = [t[:7] if len(t) >= 8 else t for t in terms]
+    windows: list[tuple[int, int, int]] = []
+    pos = head_len
+    step = 450
+    while pos < len(page_text):
+        end = min(len(page_text), pos + 1100)
+        chunk = lower[pos:end]
+        matches = sum(1 for st in stems if st in chunk)
+        if matches > 0:
+            has_num = 1 if _DIGIT_RE.search(chunk) else 0
+            windows.append((matches * 3 + has_num, pos, end))
+        pos += step
+
+    if not windows:
+        return page_text[:max_chars]
+
+    windows.sort(key=lambda w: (-w[0], w[1]))
+    chosen: list[tuple[int, int]] = []
+    budget = max_chars - head_len - 40
+    for _score, start, end in windows:
+        if any(not (end <= cs or start >= ce) for cs, ce in chosen):
+            continue
+        span = end - start
+        if span + 12 > budget:
+            continue
+        chosen.append((start, end))
+        budget -= span + 12
+        if budget < 250:
+            break
+
+    chosen.sort()
+    parts = [page_text[:head_len].rstrip()]
+    parts.extend(page_text[s:e].strip() for s, e in chosen)
+    return "\n\n[...]\n\n".join(parts)[:max_chars]
 
 
 def is_implausible_outlier(value: float, unit: str, rule: AlertRule) -> bool:

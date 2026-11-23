@@ -25,6 +25,7 @@ from src.domain.exceptions import (
 from src.domain.models import (
     AlertEvent,
     AlertRule,
+    CheckDiagnostics,
     CheckLogEntry,
     DetectorFinding,
     DiscoveredItem,
@@ -38,6 +39,7 @@ __all__ = [
     "AlertRule",
     "AuthRole",
     "ChannelType",
+    "CheckDiagnostics",
     "CheckLogEntry",
     "CheckOutcome",
     "ComparisonOperator",

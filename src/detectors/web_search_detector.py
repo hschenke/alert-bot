@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 
 from src.config.constants import MAX_DISCOVERED_ITEMS_PER_CHECK
 from src.detectors.comparators import evaluate_numeric_operator, parse_localized_float
+from src.detectors.diagnostics import CheckTraceBuilder, format_source_label
 from src.detectors.http_client import SafeHttpFetcher, extract_clean_html_text
 from src.detectors.llm_gateway import AlertLLMGateway
 from src.detectors.search_provider import FreeWebSearchProvider, WebSearchProvider
@@ -43,6 +45,7 @@ def _try_parse_rss_entries(xml_text: str) -> list[DiscoveredItem]:
                     title=title[:180],
                     url=url_val,
                     summary=desc,
+                    source_tool="rss_feed",
                 )
             )
     return items
@@ -67,16 +70,28 @@ class WebSearchDetector:
         """Prüft Web-Suchergebnisse und optionale Ziel-URL auf passende Treffer."""
         page_context, rss_candidates = self._fetch_target_url_candidates(rule)
         query = rule.search_query.strip() or rule.title.strip()
+        trace = CheckTraceBuilder(stage="web_search", query=query)
         search_hits = self._search_provider.search(query) if query else []
+        getter = getattr(self._search_provider, "get_last_search_diagnostics", None)
+        trace.merge_search(getter() if callable(getter) else None)
         candidates = self._merge_candidates(rss_candidates, search_hits)
+        trace.raw_hits = len(candidates)
+        for item in candidates[:4]:
+            trace.add_source(format_source_label(item))
 
         if self._llm is not None:
             try:
-                return self._evaluate_with_llm(rule, candidates, page_context)
+                finding = self._evaluate_with_llm(rule, candidates, page_context)
+                trace.relevant_hits = len(finding.items)
+                trace.llm_status = f"ok ({len(finding.items)} Treffer)"
+                return replace(finding, diagnostics=trace.build())
             except Exception as exc:
+                trace.llm_status = f"Fallback auf Heuristik ({type(exc).__name__})"
                 logger.warning("KI-Auswertung fehlgeschlagen (%s), wechsle auf Heuristik: %s", type(exc).__name__, exc)
 
-        return self._evaluate_heuristically(rule, candidates)
+        finding = self._evaluate_heuristically(rule, candidates)
+        trace.relevant_hits = len(finding.items)
+        return replace(finding, diagnostics=trace.build())
 
     def _fetch_target_url_candidates(self, rule: AlertRule) -> tuple[str, list[DiscoveredItem]]:
         if not rule.target_url.strip():

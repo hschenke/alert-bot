@@ -186,4 +186,5 @@ def map_row_to_check_log(row: dict[str, Any]) -> CheckLogEntry:
         measured_display=str(row.get("measured_display") or ""),
         duration_ms=int(row.get("duration_ms") or 0),
         created_at=str(row.get("created_at") or ""),
+        details_json=str(row.get("details_json") or ""),
     )

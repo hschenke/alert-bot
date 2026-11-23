@@ -57,4 +57,8 @@ class AlertWorkDispatcher:
         outcome = self._local.run_rule_sync(rule_id=rule_id, repository=repository)
         if outcome is None:
             return None, "Regel wurde nicht gefunden."
+        if outcome.error_message:
+            return outcome, f"Prüf-Fehler: {outcome.error_message[:140]}"
+        if outcome.finding and outcome.finding.measured_display:
+            return outcome, f"Geprüft ({outcome.finding.measured_display})."
         return outcome, f"Prüfung abgeschlossen ({outcome.outcome.value})."

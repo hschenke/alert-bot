@@ -82,7 +82,8 @@ DDL_STATEMENTS: tuple[str, ...] = (
         message TEXT NOT NULL,
         measured_display TEXT NOT NULL DEFAULT '',
         duration_ms INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        details_json TEXT NOT NULL DEFAULT ''
     )
     """,
     """

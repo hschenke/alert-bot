@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 
 from src.detectors.comparators import evaluate_text_operator
+from src.detectors.diagnostics import CheckTraceBuilder
 from src.detectors.http_client import SafeHttpFetcher, extract_clean_html_text
 from src.detectors.llm_gateway import AlertLLMGateway
 from src.domain.enums import ComparisonOperator
@@ -31,14 +32,26 @@ class PageChangeDetector:
         if not rule.target_url.strip():
             raise DetectorExecutionError("Keine Ziel-URL für den Website-Änderungs-Wächter angegeben.")
 
+        trace = CheckTraceBuilder(stage="page_change", query=rule.target_url, provider="direct_http")
         resp = self._http.fetch(rule.target_url)
         if resp.status_code >= 400:
-            raise DetectorExecutionError(f"Zielseite antwortete mit HTTP {resp.status_code}.")
+            trace.add_page_checked(f"{resp.final_url}: HTTP {resp.status_code}")
+            trace.hint = "Prüfe, ob die Ziel-URL erreichbar ist oder Bot-Zugriffe blockiert."
+            raise DetectorExecutionError(
+                f"Zielseite antwortete mit HTTP {resp.status_code}.",
+                diagnostics=trace.build(),
+            )
 
         clean_text = extract_clean_html_text(resp.text, rule.threshold.css_selector)
         if not clean_text:
-            raise DetectorExecutionError("Kein Textinhalt auf der überwachten Seite gefunden.")
+            trace.add_page_checked(f"{resp.final_url}: HTTP {resp.status_code}, leerer Inhalt")
+            trace.hint = "CSS-Selektor prüfen oder testen, ob Inhalte erst per JavaScript geladen werden."
+            raise DetectorExecutionError(
+                "Kein Textinhalt auf der überwachten Seite gefunden.",
+                diagnostics=trace.build(),
+            )
 
+        trace.add_page_checked(f"{resp.final_url}: HTTP {resp.status_code} ({len(clean_text)} Zeichen)")
         current_hash = hashlib.sha256(clean_text.encode("utf-8")).hexdigest()[:24]
 
         target_phrase = rule.threshold.target_text.strip()
@@ -55,6 +68,7 @@ class PageChangeDetector:
                 measured_display="Treffer" if matched else "Unverändert",
                 content_hash=current_hash,
                 source_url=resp.final_url,
+                diagnostics=trace.build(),
             )
 
         if not rule.last_content_hash:
@@ -64,6 +78,7 @@ class PageChangeDetector:
                 measured_display="Baseline gespeichert",
                 content_hash=current_hash,
                 source_url=resp.final_url,
+                diagnostics=trace.build(),
             )
 
         if current_hash == rule.last_content_hash:
@@ -73,10 +88,11 @@ class PageChangeDetector:
                 measured_display="Unverändert",
                 content_hash=current_hash,
                 source_url=resp.final_url,
+                diagnostics=trace.build(),
             )
 
         if self._llm is not None and rule.condition_description.strip():
-            return self._evaluate_change_with_llm(rule, clean_text, current_hash, resp.final_url)
+            return self._evaluate_change_with_llm(rule, clean_text, current_hash, resp.final_url, trace)
 
         snippet = clean_text[:220].replace("\n", " ")
         return DetectorFinding(
@@ -85,6 +101,7 @@ class PageChangeDetector:
             measured_display="Änderung erkannt",
             content_hash=current_hash,
             source_url=resp.final_url,
+            diagnostics=trace.build(),
         )
 
     def _evaluate_change_with_llm(
@@ -93,9 +110,10 @@ class PageChangeDetector:
         clean_text: str,
         current_hash: str,
         final_url: str,
+        trace: CheckTraceBuilder,
     ) -> DetectorFinding:
         if self._llm is None:
-            raise DetectorExecutionError("Kein KI-Gateway verfügbar.")
+            raise DetectorExecutionError("Kein KI-Gateway verfügbar.", diagnostics=trace.build())
         prompt = (
             f"Überwachungsauftrag: {rule.user_prompt}\n"
             f"Relevante Bedingung: {rule.condition_description}\n"
@@ -107,10 +125,12 @@ class PageChangeDetector:
             schema_cls=AiChangeEvaluation,
         )
         badge = res.extracted_status.strip() or ("Relevante Änderung" if res.relevant_change else "Irrelevante Änderung")
+        trace.llm_status = badge[:80]
         return DetectorFinding(
             condition_met=bool(res.relevant_change),
             summary=res.summary.strip(),
             measured_display=badge[:80],
             content_hash=current_hash,
             source_url=final_url,
+            diagnostics=trace.build(),
         )
