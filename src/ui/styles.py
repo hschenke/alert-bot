@@ -163,6 +163,19 @@ div[data-testid="stExpander"] div[data-testid="stExpander"] {
     margin-top: 0.35rem !important;
     margin-bottom: 0 !important;
 }
+
+/* Mobile-freundliche Schrift ohne Punkt in der Null (0) für alle Werte-Badges & Code-Elemente */
+code,
+pre,
+kbd,
+samp,
+div[data-testid="stMarkdownContainer"] code,
+div[data-testid="stExpander"] code,
+div[data-testid="stExpander"] summary code {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-variant-numeric: tabular-nums !important;
+    font-feature-settings: "zero" 0 !important;
+}
 </style>
 """
 

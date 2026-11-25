@@ -66,6 +66,16 @@ class TestAppIconsAndSubtleUi:
         assert format_interval_label(1440) == "1d"
         assert format_interval_label(2880) == "2d"
 
+    def test_code_badges_use_readable_sans_serif_font_without_dotted_zero(self) -> None:
+        from src.ui.styles import _STATIC_CSS
+
+        root = Path(__file__).resolve().parent.parent
+        config_toml = (root / ".streamlit" / "config.toml").read_text(encoding="utf-8")
+        assert 'codeFont = "sans-serif"' in config_toml
+        assert 'font-feature-settings: "zero" 0' in _STATIC_CSS
+        assert "font-variant-numeric: tabular-nums" in _STATIC_CSS
+        assert 'div[data-testid="stExpander"] summary code' in _STATIC_CSS
+
     def test_streamlit_app_renders_alerts_title_compact_kpis_logs_expander_and_safe_delete(
         self,
         monkeypatch,
