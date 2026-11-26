@@ -27,7 +27,13 @@ from src.security.sanitization import (
 )
 from src.security.ssrf_guard import validate_safe_external_url
 from src.storage.repository import SqlAlertRepository
-from src.ui.formatters import OPERATOR_LABELS, TRIGGER_LABELS, WEATHER_METRIC_LABELS
+from src.ui.formatters import (
+    EXTREME_STEP_HELP,
+    OPERATOR_LABELS,
+    TRIGGER_LABELS,
+    TRIGGER_MODE_HELP,
+    WEATHER_METRIC_LABELS,
+)
 from src.worker.dispatcher import AlertWorkDispatcher
 
 
@@ -58,25 +64,43 @@ def render_rule_editor_panel(
                 options=trig_options,
                 index=trig_options.index(rule.trigger_mode),
                 format_func=lambda t: TRIGGER_LABELS[t],
+                help=TRIGGER_MODE_HELP,
                 key=f"{kp}_trig",
             )
         with m2:
-            cooldown_minutes = int(
-                st.number_input(
-                    "Cooldown (min)",
-                    min_value=0,
-                    max_value=10080,
-                    value=int(rule.cooldown_minutes),
-                    step=15,
-                    key=f"{kp}_cd",
+            if trigger_mode == TriggerMode.ON_NEW_EXTREME:
+                unit_suffix = f" ({threshold.unit})" if threshold.unit else ""
+                extreme_step = float(
+                    st.number_input(
+                        f"Min. Step{unit_suffix}",
+                        min_value=0.0,
+                        value=float(rule.threshold.extreme_step),
+                        step=0.5,
+                        format="%.2f",
+                        help=EXTREME_STEP_HELP,
+                        key=f"{kp}_step",
+                    )
                 )
-            )
+                cooldown_minutes = int(rule.cooldown_minutes)
+            else:
+                extreme_step = float(rule.threshold.extreme_step)
+                cooldown_minutes = int(
+                    st.number_input(
+                        "Cooldown (min)",
+                        min_value=0,
+                        max_value=10080,
+                        value=int(rule.cooldown_minutes),
+                        step=15,
+                        key=f"{kp}_cd",
+                    )
+                )
         with m3:
             notify_email = st.text_input(
                 "Notify Email (blank = default)",
                 value=rule.notify_email,
                 key=f"{kp}_email",
             )
+        threshold = replace(threshold, extreme_step=max(0.0, extreme_step))
 
         st.divider()
         st.caption("🔧 **Rectify Saved Value / State** (fix bogus readings or reset trigger flags)")
@@ -277,6 +301,7 @@ def _save_edits(
             last_value_text=clean_last_val,
             last_condition_met=False if reset_state else rule.last_condition_met,
             last_triggered_at="" if reset_state else rule.last_triggered_at,
+            last_triggered_value=None if reset_state else rule.last_triggered_value,
             last_error="" if reset_state else rule.last_error,
             consecutive_failures=0 if reset_state else rule.consecutive_failures,
             last_content_hash="" if reset_baseline else rule.last_content_hash,

@@ -187,5 +187,42 @@ class TestEmailLinkAdminFlowAndRectification:
             assert updated.last_value_text == ""
             assert updated.last_condition_met is False
             assert updated.last_triggered_at == ""
+            assert updated.last_triggered_value is None
         finally:
             verify_repo.close()
+
+    def test_admin_can_configure_on_new_extreme_and_step_width(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ) -> None:
+        db_file = tmp_path / "extreme_step_flow.db"
+        _seed_bogus_alert_db(db_file)
+
+        monkeypatch.setenv("SQLITE_PATH", str(db_file))
+        monkeypatch.setenv("TURSO_URL", "")
+        monkeypatch.setenv("TURSO_KEY", "")
+        monkeypatch.setenv("APP_PASSWORD", "")
+        monkeypatch.setenv("WORKER_MODE", "github")
+
+        at = AppTest.from_file(ENTRYPOINT).run()
+        assert not at.exception
+
+        at = at.button(key="edit_bkk1").click().run()
+        assert not at.exception
+
+        at = at.selectbox(key="ed_bkk1_trig").select(TriggerMode.ON_NEW_EXTREME).run()
+        assert not at.exception
+        at.number_input(key="ed_bkk1_step").set_value(0.5)
+        at = at.button(key="ed_bkk1_save").click().run()
+        assert not at.exception
+
+        verify_repo = SqlAlertRepository(SqliteExecutor(db_file))
+        try:
+            updated = verify_repo.get_rule("bkk1")
+            assert updated is not None
+            assert updated.trigger_mode == TriggerMode.ON_NEW_EXTREME
+            assert updated.threshold.extreme_step == 0.5
+        finally:
+            verify_repo.close()
+

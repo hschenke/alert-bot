@@ -142,6 +142,7 @@ class AlertRuleCompiler:
             unit=draft.unit.strip()[:20],
             css_selector=validate_css_selector(draft.css_selector),
             json_path=validate_json_path(draft.json_path),
+            extreme_step=max(0.0, float(draft.extreme_step or 0.0)),
         )
 
         return AlertRule(

@@ -41,6 +41,7 @@ class TriggerMode(StrEnum):
     """Steuert, wann bei erfüllter Bedingung tatsächlich eine Benachrichtigung rausgeht."""
 
     ON_STATE_CHANGE = "on_state_change"
+    ON_NEW_EXTREME = "on_new_extreme"
     EVERY_NEW_ITEM = "every_new_item"
     COOLDOWN = "cooldown"
     ONCE = "once"

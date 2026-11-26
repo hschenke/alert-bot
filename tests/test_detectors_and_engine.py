@@ -392,3 +392,110 @@ class TestDetectorsAndAntiSpamEngine:
         assert len(notifier.sent_events) == 2
         repo.close()
 
+    def test_on_new_extreme_triggers_on_deeper_values_with_step_and_resets_after_recovery(self) -> None:
+        repo = SqlAlertRepository(SqliteExecutor(":memory:"))
+        notifier = RecordingNotifier()
+
+        def _make_weather_http(temp_c: float) -> StubHttpFetcher:
+            return StubHttpFetcher(
+                {
+                    "geocoding-api.open-meteo.com": (
+                        200,
+                        '{"results":[{"name":"Berlin","country":"Deutschland","latitude":52.52,"longitude":13.40}]}',
+                    ),
+                    "api.open-meteo.com": (
+                        200,
+                        f'{{"current":{{"temperature_2m":{temp_c}}}}}',
+                    ),
+                }
+            )
+
+        try:
+            # 1) Schrittweite 0.5 °C bei <= 0 °C (Frost-Szenario)
+            rule = AlertRule(
+                id="wx_frost_step",
+                title="Frost Berlin",
+                user_prompt="Temperatur in Berlin <= 0 °C",
+                detector_type=DetectorType.WEATHER_THRESHOLD,
+                threshold=ThresholdSpec(
+                    location_name="Berlin",
+                    weather_metric=WeatherMetric.TEMPERATURE_C,
+                    operator=ComparisonOperator.LTE,
+                    target_value=0.0,
+                    unit="°C",
+                    extreme_step=0.5,
+                ),
+                trigger_mode=TriggerMode.ON_NEW_EXTREME,
+                created_at="2026-11-26T06:00:00+00:00",
+                updated_at="2026-11-26T06:00:00+00:00",
+            )
+            repo.upsert_rule(rule)
+
+            # -0.5 °C -> 1. Treffer der Frostphase -> TRIGGERED (Extreme = -0.5)
+            out1 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(-0.5)).evaluate_rule(rule)
+            assert out1.outcome == CheckOutcome.TRIGGERED
+            assert out1.rule.last_triggered_value == -0.5
+
+            # -0.8 °C -> nur 0.3 °C tiefer (< 0.5 °C Schritt) -> SUPPRESSED (Extreme bleibt -0.5)
+            out2 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(-0.8)).evaluate_rule(out1.rule)
+            assert out2.outcome == CheckOutcome.SUPPRESSED
+            assert out2.rule.last_triggered_value == -0.5
+
+            # -1.0 °C -> exakt 0.5 °C tiefer als -0.5 °C -> TRIGGERED (Extreme = -1.0)
+            out3 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(-1.0)).evaluate_rule(out2.rule)
+            assert out3.outcome == CheckOutcome.TRIGGERED
+            assert out3.rule.last_triggered_value == -1.0
+            assert "Neuer Extremwert" in out3.finding.summary
+
+            # -0.3 °C -> wärmer als -1.0 °C -> SUPPRESSED (Extreme bleibt -1.0)
+            out4 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(-0.3)).evaluate_rule(out3.rule)
+            assert out4.outcome == CheckOutcome.SUPPRESSED
+            assert out4.rule.last_triggered_value == -1.0
+
+            # +1.9 °C -> Bedingung nicht mehr erfüllt -> OK_NO_MATCH + Reset last_triggered_value
+            out5 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(1.9)).evaluate_rule(out4.rule)
+            assert out5.outcome == CheckOutcome.OK_NO_MATCH
+            assert out5.rule.last_condition_met is False
+            assert out5.rule.last_triggered_value is None
+
+            # -0.2 °C -> Neue Frostphase startet frisch -> TRIGGERED (Extreme = -0.2)
+            out6 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(-0.2)).evaluate_rule(out5.rule)
+            assert out6.outcome == CheckOutcome.TRIGGERED
+            assert out6.rule.last_triggered_value == -0.2
+            assert len(notifier.sent_events) == 3
+
+            # 2) Schrittweite 0.0 bei >= 30 °C (jeder höhere Wert löst aus)
+            heat_rule = AlertRule(
+                id="wx_heat_any",
+                title="Hitze Berlin",
+                user_prompt="Temperatur in Berlin >= 30 °C",
+                detector_type=DetectorType.WEATHER_THRESHOLD,
+                threshold=ThresholdSpec(
+                    location_name="Berlin",
+                    weather_metric=WeatherMetric.TEMPERATURE_C,
+                    operator=ComparisonOperator.GTE,
+                    target_value=30.0,
+                    unit="°C",
+                    extreme_step=0.0,
+                ),
+                trigger_mode=TriggerMode.ON_NEW_EXTREME,
+                created_at="2026-11-26T06:00:00+00:00",
+                updated_at="2026-11-26T06:00:00+00:00",
+            )
+            repo.upsert_rule(heat_rule)
+
+            h1 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(30.0)).evaluate_rule(heat_rule)
+            assert h1.outcome == CheckOutcome.TRIGGERED
+            assert h1.rule.last_triggered_value == 30.0
+
+            h2 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(30.1)).evaluate_rule(h1.rule)
+            assert h2.outcome == CheckOutcome.TRIGGERED
+            assert h2.rule.last_triggered_value == 30.1
+
+            h3 = AlertEvaluationEngine(AppSettings(), repo, notifier, http_fetcher=_make_weather_http(30.1)).evaluate_rule(h2.rule)
+            assert h3.outcome == CheckOutcome.SUPPRESSED
+            assert h3.rule.last_triggered_value == 30.1
+        finally:
+            repo.close()
+
+

@@ -29,6 +29,10 @@ prompts:
     - `page_change`: Wenn eine konkrete Webseite (URL) auf inhaltliche Änderungen, freie
       Termine oder Produktverfügbarkeit überwacht werden soll.
     - `http_api`: Wenn Erreichbarkeit (Uptime/HTTP-Status) oder ein JSON-API-Feld überwacht wird.
+    Wähle `trigger_mode`: `on_state_change` als Standard für Schwellenwerte, `on_new_extreme`
+    (optional mit `extreme_step`) wenn bei jedem weiteren Tiefst-/Höchstwert erneut alarmiert
+    werden soll (z. B. wenn es noch kälter wird oder der Preis weiter fällt), `every_new_item`
+    für `web_search`, `cooldown` für periodische Erinnerungen oder `once` für einmalige Treffer.
 
   web_search_system_prompt: >-
     Du bist ein präziser Fakten- und Inserate-Analyst für einen Alert-Bot.

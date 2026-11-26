@@ -44,6 +44,7 @@ def serialize_threshold(spec: ThresholdSpec) -> str:
         "css_selector": spec.css_selector,
         "json_path": spec.json_path,
         "expected_status_code": spec.expected_status_code,
+        "extreme_step": max(0.0, float(spec.extreme_step or 0.0)),
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -58,6 +59,8 @@ def deserialize_threshold(raw_json: str) -> ThresholdSpec:
         data = {}
     raw_val = data.get("target_value")
     target_val = float(raw_val) if isinstance(raw_val, (int, float)) else None
+    raw_step = data.get("extreme_step")
+    extreme_step = max(0.0, float(raw_step)) if isinstance(raw_step, (int, float)) else 0.0
     return ThresholdSpec(
         location_name=str(data.get("location_name", "")),
         weather_metric=_safe_enum(WeatherMetric, data.get("weather_metric"), WeatherMetric.TEMPERATURE_C),
@@ -68,6 +71,7 @@ def deserialize_threshold(raw_json: str) -> ThresholdSpec:
         css_selector=str(data.get("css_selector", "")),
         json_path=str(data.get("json_path", "")),
         expected_status_code=int(data.get("expected_status_code", 200) or 200),
+        extreme_step=extreme_step,
     )
 
 
@@ -120,6 +124,15 @@ def deserialize_items(raw_json: str) -> tuple[DiscoveredItem, ...]:
     return tuple(items)
 
 
+def _safe_optional_float(raw: Any) -> float | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def map_row_to_rule(row: dict[str, Any]) -> AlertRule:
     """Wandelt eine `alert_rules`-Zeile in ein unveränderliches `AlertRule`-Objekt um."""
     return AlertRule(
@@ -141,6 +154,7 @@ def map_row_to_rule(row: dict[str, Any]) -> AlertRule:
         last_checked_at=str(row.get("last_checked_at") or ""),
         next_check_at=str(row.get("next_check_at") or ""),
         last_triggered_at=str(row.get("last_triggered_at") or ""),
+        last_triggered_value=_safe_optional_float(row.get("last_triggered_value")),
         last_condition_met=bool(int(row.get("last_condition_met", 0))),
         last_value_text=str(row.get("last_value_text") or ""),
         last_content_hash=str(row.get("last_content_hash") or ""),

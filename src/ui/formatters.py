@@ -29,11 +29,28 @@ DETECTOR_LABELS: dict[DetectorType, str] = {
 }
 
 TRIGGER_LABELS: dict[TriggerMode, str] = {
-    TriggerMode.ON_STATE_CHANGE: "🔄 On State Change",
+    TriggerMode.ON_STATE_CHANGE: "🔄 On State Change (once per breach)",
+    TriggerMode.ON_NEW_EXTREME: "📉 On New Extreme (deeper / higher)",
     TriggerMode.EVERY_NEW_ITEM: "🆕 Every New Item",
-    TriggerMode.COOLDOWN: "⏱️ Cooldown",
-    TriggerMode.ONCE: "1️⃣ Once",
+    TriggerMode.COOLDOWN: "⏱️ Cooldown (repeat after pause)",
+    TriggerMode.ONCE: "1️⃣ Once (auto-pause)",
 }
+
+TRIGGER_MODE_HELP = (
+    "- **On State Change (once per breach):** Alarmiert 1× beim Übergang False → True. "
+    "Bleibt danach stumm, bis die Bedingung zwischendurch wieder nicht erfüllt war.\n"
+    "- **On New Extreme (deeper / higher):** Alarmiert beim ersten Treffer und danach erneut bei jeder "
+    "weiteren Verschärfung (neuer Tiefstwert bei `≤`/`<`, neuer Höchstwert bei `≥`/`>`, "
+    "optional mit konfigurierbarer Schrittweite). Setzt sich zurück, sobald die Bedingung wieder False ist.\n"
+    "- **Every New Item:** Alarmiert für jeden neu gefundenen Eintrag (ideal für Web Search).\n"
+    "- **Cooldown:** Alarmiert wiederholt nach Ablauf der Pause, solange die Bedingung erfüllt bleibt.\n"
+    "- **Once:** Alarmiert genau einmal und pausiert die Regel danach automatisch."
+)
+
+EXTREME_STEP_HELP = (
+    "Mindest-Schrittweite für den nächsten Alarm (0 = jeder neue Extremwert; "
+    "z. B. 0,5 für mind. 0,5 °C kälter oder 1,0 für ganze Grad-Schritte)."
+)
 
 WEATHER_METRIC_LABELS: dict[WeatherMetric, str] = {
     WeatherMetric.TEMPERATURE_C: "Temperature (°C)",
@@ -132,4 +149,13 @@ def build_rule_info_html(rule: AlertRule) -> str:
         items.append(f"🎯 Target: <b>{op_txt} {rule.threshold.target_value:g} {unit_txt}</b>")
     elif rule.trigger_mode == TriggerMode.ON_STATE_CHANGE:
         items.append("🎯 Trigger: <i>On Value Change</i>")
+    if rule.trigger_mode == TriggerMode.ON_NEW_EXTREME:
+        unit_txt = escape_html(rule.threshold.unit)
+        unit_suffix = f" {unit_txt}" if unit_txt else ""
+        if rule.threshold.extreme_step > 0:
+            items.append(f"📏 Step: <b>{rule.threshold.extreme_step:g}{unit_suffix}</b>")
+        else:
+            items.append("📏 Step: <i>any new extreme</i>")
+        if rule.last_triggered_value is not None:
+            items.append(f"📌 Last Extreme: <b>{rule.last_triggered_value:g}{unit_suffix}</b>")
     return " &nbsp;•&nbsp; ".join(items)

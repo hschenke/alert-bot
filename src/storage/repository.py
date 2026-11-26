@@ -40,6 +40,7 @@ class SqlAlertRepository:
         """Führt alle DDL-Migrationen idempotent aus."""
         self._executor.execute_batch([(ddl, ()) for ddl in DDL_STATEMENTS])
         self._ensure_check_logs_details_column()
+        self._ensure_rule_columns()
 
     def _ensure_check_logs_details_column(self) -> None:
         res = self._executor.execute("PRAGMA table_info(alert_check_logs)")
@@ -47,6 +48,14 @@ class SqlAlertRepository:
         if "details_json" not in cols:
             self._executor.execute(
                 "ALTER TABLE alert_check_logs ADD COLUMN details_json TEXT NOT NULL DEFAULT ''"
+            )
+
+    def _ensure_rule_columns(self) -> None:
+        res = self._executor.execute("PRAGMA table_info(alert_rules)")
+        cols = {str(row.get("name") or "") for row in res.rows}
+        if "last_triggered_value" not in cols:
+            self._executor.execute(
+                "ALTER TABLE alert_rules ADD COLUMN last_triggered_value REAL"
             )
 
     def upsert_rule(self, rule: AlertRule) -> None:
@@ -57,7 +66,7 @@ class SqlAlertRepository:
             search_query, target_url, condition_description, threshold_json,
             trigger_mode, check_interval_minutes, cooldown_minutes,
             notify_on_first_match, notify_email, channels_json,
-            last_checked_at, next_check_at, last_triggered_at,
+            last_checked_at, next_check_at, last_triggered_at, last_triggered_value,
             last_condition_met, last_value_text, last_content_hash,
             last_error, consecutive_failures, total_triggers, baseline_seeded,
             created_at, updated_at
@@ -66,7 +75,7 @@ class SqlAlertRepository:
             ?, ?, ?, ?,
             ?, ?, ?,
             ?, ?, ?,
-            ?, ?, ?,
+            ?, ?, ?, ?,
             ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?
@@ -89,6 +98,7 @@ class SqlAlertRepository:
             last_checked_at = excluded.last_checked_at,
             next_check_at = excluded.next_check_at,
             last_triggered_at = excluded.last_triggered_at,
+            last_triggered_value = excluded.last_triggered_value,
             last_condition_met = excluded.last_condition_met,
             last_value_text = excluded.last_value_text,
             last_content_hash = excluded.last_content_hash,
@@ -117,6 +127,7 @@ class SqlAlertRepository:
             rule.last_checked_at,
             rule.next_check_at,
             rule.last_triggered_at,
+            rule.last_triggered_value,
             int(rule.last_condition_met),
             rule.last_value_text,
             rule.last_content_hash,

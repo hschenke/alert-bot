@@ -58,6 +58,7 @@ class ThresholdSpec:
     css_selector: str = ""
     json_path: str = ""
     expected_status_code: int = 200
+    extreme_step: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class AlertRule:
     last_checked_at: str = ""
     next_check_at: str = ""
     last_triggered_at: str = ""
+    last_triggered_value: float | None = None
     last_condition_met: bool = False
     last_value_text: str = ""
     last_content_hash: str = ""

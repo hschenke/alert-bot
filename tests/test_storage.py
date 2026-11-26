@@ -137,3 +137,69 @@ class TestSqlAlertRepository:
         assert _encode_turso_arg(None) == {"type": "null"}
         assert _decode_turso_cell({"type": "integer", "value": "42"}) == 42
         assert _decode_turso_cell({"type": "float", "value": 19.8}) == 19.8
+
+    def test_on_new_extreme_persistence_and_legacy_migration(self) -> None:
+        executor = SqliteExecutor(":memory:")
+        # Simuliere bestehende ältere Datenbank ohne Spalte last_triggered_value
+        executor.execute(
+            """
+            CREATE TABLE alert_rules (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                user_prompt TEXT NOT NULL,
+                detector_type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                search_query TEXT NOT NULL DEFAULT '',
+                target_url TEXT NOT NULL DEFAULT '',
+                condition_description TEXT NOT NULL DEFAULT '',
+                threshold_json TEXT NOT NULL DEFAULT '{}',
+                trigger_mode TEXT NOT NULL DEFAULT 'on_state_change',
+                check_interval_minutes INTEGER NOT NULL DEFAULT 30,
+                cooldown_minutes INTEGER NOT NULL DEFAULT 180,
+                notify_on_first_match INTEGER NOT NULL DEFAULT 1,
+                notify_email TEXT NOT NULL DEFAULT '',
+                channels_json TEXT NOT NULL DEFAULT '["email"]',
+                last_checked_at TEXT NOT NULL DEFAULT '',
+                next_check_at TEXT NOT NULL DEFAULT '',
+                last_triggered_at TEXT NOT NULL DEFAULT '',
+                last_condition_met INTEGER NOT NULL DEFAULT 0,
+                last_value_text TEXT NOT NULL DEFAULT '',
+                last_content_hash TEXT NOT NULL DEFAULT '',
+                last_error TEXT NOT NULL DEFAULT '',
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                total_triggers INTEGER NOT NULL DEFAULT 0,
+                baseline_seeded INTEGER NOT NULL DEFAULT 0,
+                locked_until TEXT NOT NULL DEFAULT '',
+                locked_by TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        repo = SqlAlertRepository(executor)
+        try:
+            rule = AlertRule(
+                id="r_ext",
+                title="Frost Berlin",
+                user_prompt="<= 0 °C",
+                detector_type=DetectorType.WEATHER_THRESHOLD,
+                threshold=ThresholdSpec(
+                    location_name="Berlin",
+                    target_value=0.0,
+                    unit="°C",
+                    extreme_step=0.5,
+                ),
+                trigger_mode=TriggerMode.ON_NEW_EXTREME,
+                last_triggered_value=-1.5,
+                created_at="2026-11-26T09:00:00+00:00",
+                updated_at="2026-11-26T09:00:00+00:00",
+            )
+            repo.upsert_rule(rule)
+            loaded = repo.get_rule("r_ext")
+            assert loaded is not None
+            assert loaded.trigger_mode == TriggerMode.ON_NEW_EXTREME
+            assert loaded.threshold.extreme_step == 0.5
+            assert loaded.last_triggered_value == -1.5
+        finally:
+            repo.close()
+

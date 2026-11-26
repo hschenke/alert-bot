@@ -20,9 +20,11 @@ from src.domain.schemas import CompiledAlertDraft
 from src.storage.repository import SqlAlertRepository
 from src.ui.formatters import (
     DETECTOR_LABELS,
+    EXTREME_STEP_HELP,
     OPERATOR_LABELS,
     PAGE_NEW_ALERT,
     TRIGGER_LABELS,
+    TRIGGER_MODE_HELP,
     WEATHER_METRIC_LABELS,
     format_interval_label,
 )
@@ -108,6 +110,13 @@ def _compile_into_session(settings: AppSettings, raw_prompt: str) -> None:
             draft = compiler.compile_from_prompt(raw_prompt, settings.email_to)
             st.session_state["compiled_draft"] = draft
             st.session_state["new_alert_use_price_threshold"] = draft.target_value is not None
+            compiled_trig = next(
+                (t for t in TriggerMode if t.value == draft.trigger_mode),
+                TriggerMode.ON_STATE_CHANGE,
+            )
+            if draft.detector_type == DetectorType.WEB_SEARCH.value and compiled_trig == TriggerMode.ON_STATE_CHANGE:
+                compiled_trig = TriggerMode.EVERY_NEW_ITEM
+            st.session_state["new_alert_trigger_mode"] = compiled_trig
             st.success(f"Draft erstellt: **{draft.title}** – Details unten prüfen & bei Bedarf anpassen.")
     except AlertBotError as exc:
         st.error(str(exc))
@@ -126,17 +135,34 @@ def _render_rule_editor_form(
         suggested_interval_minutes=settings.default_check_interval_minutes,
     )
 
-    det_options = list(DetectorType)
-    default_det = next(
-        (d for d in det_options if d.value == draft.detector_type),
-        DetectorType.WEATHER_THRESHOLD,
-    )
-    selected_det = st.selectbox(
-        "Detector",
-        options=det_options,
-        index=det_options.index(default_det),
-        format_func=lambda d: DETECTOR_LABELS[d],
-    )
+    top1, top2 = st.columns(2)
+    with top1:
+        det_options = list(DetectorType)
+        default_det = next(
+            (d for d in det_options if d.value == draft.detector_type),
+            DetectorType.WEATHER_THRESHOLD,
+        )
+        selected_det = st.selectbox(
+            "Detector",
+            options=det_options,
+            index=det_options.index(default_det),
+            format_func=lambda d: DETECTOR_LABELS[d],
+        )
+    with top2:
+        trig_options = list(TriggerMode)
+        default_trig = (
+            TriggerMode.EVERY_NEW_ITEM
+            if selected_det == DetectorType.WEB_SEARCH and draft.trigger_mode == "on_state_change"
+            else next((t for t in trig_options if t.value == draft.trigger_mode), TriggerMode.ON_STATE_CHANGE)
+        )
+        trigger_mode = st.selectbox(
+            "Trigger Mode",
+            options=trig_options,
+            index=trig_options.index(default_trig),
+            format_func=lambda t: TRIGGER_LABELS[t],
+            help=TRIGGER_MODE_HELP,
+            key="new_alert_trigger_mode",
+        )
 
     use_price_threshold = draft.target_value is not None
     if selected_det == DetectorType.PRICE_THRESHOLD:
@@ -169,21 +195,47 @@ def _render_rule_editor_form(
             value=draft.condition_description or prompt_val,
         )
 
-        t1, t2 = st.columns(2)
-        with t1:
-            trig_options = list(TriggerMode)
-            default_trig = (
-                TriggerMode.EVERY_NEW_ITEM
-                if selected_det == DetectorType.WEB_SEARCH and draft.trigger_mode == "on_state_change"
-                else next((t for t in trig_options if t.value == draft.trigger_mode), TriggerMode.ON_STATE_CHANGE)
-            )
-            trigger_mode = st.selectbox(
-                "Trigger Mode",
-                options=trig_options,
-                index=trig_options.index(default_trig),
-                format_func=lambda t: TRIGGER_LABELS[t],
-            )
-        with t2:
+        extreme_step = max(0.0, float(draft.extreme_step or 0.0))
+        cooldown_minutes = settings.default_cooldown_minutes
+        if trigger_mode == TriggerMode.ON_NEW_EXTREME:
+            t1, t2 = st.columns(2)
+            with t1:
+                unit_suffix = f" ({unit})" if unit else ""
+                extreme_step = float(
+                    st.number_input(
+                        f"Min. Step{unit_suffix}",
+                        min_value=0.0,
+                        value=extreme_step,
+                        step=0.5,
+                        format="%.2f",
+                        help=EXTREME_STEP_HELP,
+                    )
+                )
+            with t2:
+                notify_email = st.text_input(
+                    "Notify Email (blank = default)",
+                    value=settings.email_to,
+                    placeholder="name@example.com",
+                )
+        elif trigger_mode == TriggerMode.COOLDOWN:
+            t1, t2 = st.columns(2)
+            with t1:
+                cooldown_minutes = int(
+                    st.number_input(
+                        "Cooldown (min)",
+                        min_value=0,
+                        max_value=10080,
+                        value=int(settings.default_cooldown_minutes),
+                        step=15,
+                    )
+                )
+            with t2:
+                notify_email = st.text_input(
+                    "Notify Email (blank = default)",
+                    value=settings.email_to,
+                    placeholder="name@example.com",
+                )
+        else:
             notify_email = st.text_input(
                 "Notify Email (blank = default)",
                 value=settings.email_to,
@@ -223,11 +275,13 @@ def _render_rule_editor_form(
                 css_selector=css_sel,
                 json_path=json_path,
                 trigger_mode=trigger_mode.value,
+                extreme_step=max(0.0, extreme_step),
                 suggested_interval_minutes=interval,
             ),
             user_prompt=prompt_val or condition_desc or title,
             notify_email=notify_email,
             notify_first=notify_first,
+            cooldown_minutes=cooldown_minutes,
             run_immediately=run_immediately,
         )
 
@@ -326,15 +380,19 @@ def _handle_save_submission(
     user_prompt: str,
     notify_email: str,
     notify_first: bool,
+    cooldown_minutes: int | None,
     run_immediately: bool,
 ) -> None:
     try:
+        effective_cooldown = (
+            settings.default_cooldown_minutes if cooldown_minutes is None else cooldown_minutes
+        )
         rule = AlertRuleCompiler.build_validated_rule(
             draft=final_draft,
             user_prompt=user_prompt,
             notify_email=notify_email,
             notify_on_first_match=notify_first,
-            cooldown_minutes=settings.default_cooldown_minutes,
+            cooldown_minutes=effective_cooldown,
         )
         repository.upsert_rule(rule)
         st.session_state.pop("compiled_draft", None)

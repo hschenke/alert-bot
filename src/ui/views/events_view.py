@@ -201,6 +201,7 @@ def _apply_event_rectification(
         last_value_text=next_val_text,
         last_condition_met=False,
         last_triggered_at="",
+        last_triggered_value=None,
         last_error="",
         consecutive_failures=0,
         total_triggers=max(0, rule.total_triggers - 1),

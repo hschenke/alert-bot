@@ -46,7 +46,11 @@ class CompiledAlertDraft(BaseModel):
     json_path: str = Field(default="", description="Optionaler JSON-Punktpfad für http_api")
     trigger_mode: str = Field(
         default="on_state_change",
-        description="on_state_change, every_new_item, cooldown oder once",
+        description="on_state_change, on_new_extreme, every_new_item, cooldown oder once",
+    )
+    extreme_step: float = Field(
+        default=0.0,
+        description="Mindest-Schrittweite für on_new_extreme (0.0 = jeder neue Extremwert, z. B. 0.5 oder 1.0)",
     )
     suggested_interval_minutes: int = Field(
         default=30,

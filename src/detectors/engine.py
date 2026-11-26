@@ -11,6 +11,7 @@ from typing import Protocol
 
 from src.config.constants import MAX_CONSECUTIVE_FAILURES_BEFORE_ERROR
 from src.config.settings import AppSettings
+from src.detectors.comparators import format_number_de
 from src.detectors.diagnostics import format_diagnostics_one_liner, serialize_diagnostics
 from src.detectors.http_api_detector import HttpApiDetector
 from src.detectors.http_client import SafeHttpFetcher
@@ -61,6 +62,33 @@ def _parse_iso(ts: str) -> datetime | None:
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except ValueError:
         return None
+
+
+_EXTREME_EPSILON = 1e-9
+
+
+def _is_new_extreme(
+    operator: ComparisonOperator,
+    current: float,
+    previous: float,
+    step: float,
+) -> bool:
+    """Prüft, ob `current` gegenüber `previous` eine Verschärfung um mind. `step` darstellt."""
+    clean_step = max(0.0, float(step or 0.0))
+    if operator in {ComparisonOperator.LT, ComparisonOperator.LTE}:
+        return (
+            current <= (previous - clean_step + _EXTREME_EPSILON)
+            if clean_step > 0
+            else current < (previous - _EXTREME_EPSILON)
+        )
+    if operator in {ComparisonOperator.GT, ComparisonOperator.GTE}:
+        return (
+            current >= (previous + clean_step - _EXTREME_EPSILON)
+            if clean_step > 0
+            else current > (previous + _EXTREME_EPSILON)
+        )
+    delta = abs(current - previous)
+    return delta >= (clean_step - _EXTREME_EPSILON) if clean_step > 0 else delta > _EXTREME_EPSILON
 
 
 def _normalize_value_change_rule(rule: AlertRule) -> AlertRule:
@@ -181,6 +209,9 @@ class AlertEvaluationEngine:
         if not finding.condition_met:
             return finding, False, ""
 
+        if rule.trigger_mode == TriggerMode.ON_NEW_EXTREME:
+            return self._evaluate_new_extreme_policy(rule, finding)
+
         is_value_change_rule = (
             rule.detector_type == DetectorType.PRICE_THRESHOLD
             and rule.threshold.target_value is None
@@ -198,6 +229,34 @@ class AlertEvaluationEngine:
                 return finding, False, f"Cooldown aktiv ({rule.cooldown_minutes} Min.) – kein erneuter Alarm."
 
         return finding, True, ""
+
+    @staticmethod
+    def _evaluate_new_extreme_policy(
+        rule: AlertRule,
+        finding: DetectorFinding,
+    ) -> tuple[DetectorFinding, bool, str]:
+        if not rule.last_condition_met or rule.last_triggered_value is None:
+            return finding, True, ""
+        if finding.measured_value is None:
+            return finding, False, "Bedingung weiterhin aktiv – kein erneuter Alarm (bereits gemeldet)."
+
+        prev = rule.last_triggered_value
+        step = max(0.0, float(rule.threshold.extreme_step or 0.0))
+        unit_suffix = f" {rule.threshold.unit}" if rule.threshold.unit else ""
+        if _is_new_extreme(rule.threshold.operator, finding.measured_value, prev, step):
+            updated = replace(
+                finding,
+                summary=f"{finding.summary} (Neuer Extremwert nach {format_number_de(prev)}{unit_suffix}).",
+            )
+            return updated, True, ""
+
+        step_hint = f", Schritt: {format_number_de(step)}{unit_suffix}" if step > 0 else ""
+        return (
+            finding,
+            False,
+            f"Kein neuer Extremwert (aktuell {format_number_de(finding.measured_value)}{unit_suffix}, "
+            f"letzter Alarm: {format_number_de(prev)}{unit_suffix}{step_hint}).",
+        )
 
     def _evaluate_new_items_policy(
         self,
@@ -266,12 +325,20 @@ class AlertEvaluationEngine:
             outcome = CheckOutcome.OK_NO_MATCH
             log_msg = finding.summary
 
+        if not finding.condition_met:
+            triggered_value: float | None = None
+        elif should_fire:
+            triggered_value = finding.measured_value
+        else:
+            triggered_value = rule.last_triggered_value
+
         updated_rule = replace(
             rule,
             status=new_status,
             last_checked_at=now_iso,
             next_check_at=next_iso,
             last_triggered_at=triggered_at,
+            last_triggered_value=triggered_value,
             last_condition_met=finding.condition_met,
             last_value_text=finding.measured_display or rule.last_value_text,
             last_content_hash=finding.content_hash or rule.last_content_hash,

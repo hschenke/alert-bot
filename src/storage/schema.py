@@ -23,6 +23,7 @@ DDL_STATEMENTS: tuple[str, ...] = (
         last_checked_at TEXT NOT NULL DEFAULT '',
         next_check_at TEXT NOT NULL DEFAULT '',
         last_triggered_at TEXT NOT NULL DEFAULT '',
+        last_triggered_value REAL,
         last_condition_met INTEGER NOT NULL DEFAULT 0,
         last_value_text TEXT NOT NULL DEFAULT '',
         last_content_hash TEXT NOT NULL DEFAULT '',
